@@ -21,7 +21,7 @@ export default async ({ req, res, log, error }) => {
       message: "تم الاتصال بقاعدة البيانات بنجاح"
     });
   } catch (err) {
-    error(err.message);
+    error(err.stack || err.message || String(err));
 
     return res.json({
       success: false,
