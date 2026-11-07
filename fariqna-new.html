@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>فريقنا - إدارة المهام الجماعية</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap">
+<style>/* inlined style.css */
+:root {
+  --bg: #f5f3ef;
+  --surface: #ffffff;
+  --ink: #26323a;
+  --muted: #6b7780;
+  --line: #e4e0d8;
+  --primary: #3d7a6e;
+  --primary-dark: #2f6158;
+  --accent: #e8a86b;
+  --danger: #b5533c;
+  --todo: #8a96a0;
+  --doing: #d99a3f;
+  --done: #3d7a6e;
+  --radius: 14px;
+  --shadow: 0 6px 24px rgba(38, 50, 58, 0.08);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Tajawal", "Segoe UI", Tahoma, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+h1, h2, h3 { margin: 0; font-weight: 800; }
+button, input, textarea, select { font: inherit; }
+.hidden { display: none !important; }
+.modal.hidden { display: none !important; }
+.toast:not(.show) { visibility: hidden; }
+.muted { color: var(--muted); }
+.error { color: var(--danger); min-height: 1.4em; margin: 8px 0 0; font-size: 14px; }
+.note { color: var(--muted); font-size: 13px; margin-top: 16px; text-align: center; }
+.empty { color: var(--muted); text-align: center; padding: 32px 12px; }
+
+.screen { display: none; min-height: 100vh; }
+.screen.active { display: block; }
+
+/* الشاشة الأولى */
+#auth-screen.active {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at 15% 10%, #dcece7 0%, transparent 45%),
+              radial-gradient(circle at 90% 90%, #f7e2cc 0%, transparent 40%),
+              var(--bg);
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 32px 28px;
+  animation: rise 0.6s ease both;
+}
+.brand { text-align: center; margin-bottom: 20px; }
+.brand h1 { font-size: 30px; margin-top: 8px; }
+.brand p { margin: 4px 0 0; }
+.logo {
+  width: 56px; height: 56px; border-radius: 16px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: #fff; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800; margin: 0 auto;
+}
+.logo.sm { width: 36px; height: 36px; font-size: 18px; border-radius: 10px; }
+.tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  background: var(--bg); border-radius: 12px; padding: 4px; margin-bottom: 20px;
+}
+.tab {
+  border: 0; background: transparent; padding: 10px; border-radius: 9px;
+  cursor: pointer; color: var(--muted); font-weight: 700;
+}
+.tab.active { background: var(--surface); color: var(--primary-dark); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+
+/* النماذج والأزرار */
+.form { display: flex; flex-direction: column; gap: 14px; }
+.form label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; font-size: 14px; color: var(--muted); }
+input, textarea {
+  border: 1.5px solid var(--line); border-radius: 10px; padding: 11px 13px;
+  background: #fcfbf9; color: var(--ink); outline: none; width: 100%;
+  transition: border-color .2s, box-shadow .2s;
+}
+input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(61,122,110,.15); }
+textarea { resize: vertical; }
+
+.btn {
+  border: 0; border-radius: 10px; padding: 10px 18px; cursor: pointer;
+  font-weight: 700; transition: transform .15s, background .2s, box-shadow .2s;
+  white-space: nowrap;
+}
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn.primary { background: var(--primary); color: #fff; box-shadow: 0 4px 14px rgba(61,122,110,.25); }
+.btn.primary:hover { background: var(--primary-dark); }
+.btn.ghost { background: transparent; color: var(--primary-dark); border: 1.5px solid var(--line); }
+.btn.ghost:hover { background: var(--surface); }
+.btn.danger { background: var(--danger); color: #fff; }
+.btn.small { padding: 6px 12px; font-size: 14px; }
+.btn.block { width: 100%; padding: 12px; }
+.btn:focus-visible { outline: 3px solid rgba(61,122,110,.35); outline-offset: 2px; }
+
+/* الشريط العلوي */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 20px; background: var(--surface); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 10; flex-wrap: wrap;
+}
+.brand-small { display: flex; align-items: center; gap: 10px; font-weight: 800; }
+.top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.head-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* بطاقات المساحات */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.space-card {
+  background: var(--surface); border-radius: var(--radius); padding: 20px;
+  box-shadow: var(--shadow); cursor: pointer; border: 1.5px solid transparent;
+  transition: transform .2s, border-color .2s; animation: rise .4s ease both;
+}
+.space-card:hover { transform: translateY(-3px); border-color: var(--primary); }
+.space-card h3 { font-size: 19px; margin-bottom: 6px; }
+.space-card .meta { color: var(--muted); font-size: 14px; display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+
+.badge {
+  display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 13px; font-weight: 700;
+  background: #e3efeb; color: var(--primary-dark);
+}
+.badge.member { background: #f3ede4; color: #8a5a22; }
+
+/* رأس المساحة */
+.space-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+  flex-wrap: wrap; margin-bottom: 24px;
+}
+.space-head h2 { font-size: 28px; }
+.invite-box {
+  background: var(--surface); border: 1.5px dashed var(--primary); border-radius: 12px;
+  padding: 12px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.invite-box strong { font-size: 20px; letter-spacing: 3px; color: var(--primary-dark); }
+
+.layout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+.panel { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 20px; }
+.panel h3 { font-size: 17px; margin-bottom: 14px; }
+
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  border: 1.5px solid var(--line); background: var(--surface); padding: 6px 14px;
+  border-radius: 999px; cursor: pointer; font-weight: 700; color: var(--muted); font-size: 14px;
+}
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* المهام */
+.tasks { display: flex; flex-direction: column; gap: 12px; }
+.task {
+  background: var(--surface); border-radius: var(--radius); padding: 16px 18px;
+  box-shadow: var(--shadow); border-right: 5px solid var(--todo);
+  animation: rise .35s ease both;
+}
+.task.doing { border-right-color: var(--doing); }
+.task.done { border-right-color: var(--done); }
+.task.done .task-title { text-decoration: line-through; color: var(--muted); }
+.task-title { font-size: 18px; font-weight: 800; margin: 0 0 4px; }
+.task-details { color: var(--muted); font-size: 14px; margin: 0 0 10px; white-space: pre-wrap; }
+.task-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.task-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.status-group { display: flex; gap: 4px; background: var(--bg); border-radius: 10px; padding: 3px; }
+.status-btn {
+  border: 0; background: transparent; padding: 6px 10px; border-radius: 8px;
+  cursor: pointer; font-size: 13px; font-weight: 700; color: var(--muted);
+}
+.status-btn.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.status-btn.on.todo { color: var(--todo); }
+.status-btn.on.doing { color: var(--doing); }
+.status-btn.on.done { color: var(--done); }
+.icon-btn { border: 0; background: transparent; color: var(--danger); cursor: pointer; font-size: 13px; font-weight: 700; padding: 6px; }
+
+.assignees { border: 0; padding: 0; margin: 0; }
+.assignees legend { font-size: 14px; color: var(--muted); margin-bottom: 8px; padding: 0; }
+.check { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; font-size: 15px; }
+.check input { width: auto; }
+
+.members { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.members li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.avatar {
+  width: 36px; height: 36px; border-radius: 50%; background: #e3efeb; color: var(--primary-dark);
+  display: inline-flex; align-items: center; justify-content: center; font-weight: 800; flex-shrink: 0;
+}
+.member-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.member-info span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat { font-size: 13px; color: var(--muted); }
+
+/* النافذة الحوارية */
+.modal {
+  position: fixed; inset: 0; background: rgba(38,50,58,.45); display: flex;
+  align-items: center; justify-content: center; padding: 20px; z-index: 50;
+}
+.modal-card {
+  background: var(--surface); border-radius: 18px; padding: 24px; width: 100%; max-width: 400px;
+  box-shadow: var(--shadow); animation: rise .3s ease both;
+}
+.modal-card h3 { margin-bottom: 14px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-start; }
+
+/* تنبيه */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--ink); color: #fff; padding: 10px 20px; border-radius: 999px;
+  opacity: 0; transition: opacity .25s, transform .25s; pointer-events: none; z-index: 60; font-size: 14px;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* الجوال */
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .container { padding: 16px 14px 48px; }
+  .space-head h2 { font-size: 22px; }
+  .auth-card { padding: 26px 20px; }
+  .topbar { padding: 12px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+</style>
+</head>
+<body>
+
+<!-- شاشة الترحيب وتسجيل الدخول -->
+<section id="auth-screen" class="screen active">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="logo">ف</div>
+      <h1>فريقنا</h1>
+      <p class="muted">منصة لإدارة المهام بين الأصدقاء والعائلة</p>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="login">تسجيل الدخول</button>
+      <button class="tab" data-tab="signup">حساب جديد</button>
+    </div>
+    <form id="login-form" class="form">
+      <label>البريد الإلكتروني
+        <input type="email" name="email" required autocomplete="email">
+      </label>
+      <label>كلمة المرور
+        <input type="password" name="password" required minlength="6" autocomplete="current-password">
+      </label>
+      <button class="btn primary block" type="submit">دخول</button>
+    </form>
+    <form id="signup-form" class="form hidden">
+      <label>الاسم
+        <input type="text" name="name" required maxlength="40" autocomplete="name">
+      </label>
+      <label>البريد الإلكتروني
+        <input type="email" name="email" required autocomplete="email">
+      </label>
+      <label>كلمة المرور (6 أحرف على الأقل)
+        <input type="password" name="password" required minlength="6" autocomplete="new-password">
+      </label>
+      <button class="btn primary block" type="submit">إنشاء الحساب</button>
+    </form>
+    <p class="error" id="auth-error" role="alert"></p>
+    <p class="note">ملاحظة: البيانات تُحفظ في هذا المتصفح. لمشاركتها بين الأجهزة يلزم ربط قاعدة بيانات مشتركة.</p>
+  </div>
+</section>
+
+<!-- قائمة المساحات -->
+<section id="spaces-screen" class="screen">
+  <header class="topbar">
+    <div class="brand-small"><div class="logo sm">ف</div><span>فريقنا</span></div>
+    <div class="top-actions">
+      <span id="user-name" class="muted"></span>
+      <button class="btn ghost" id="logout-btn">خروج</button>
+    </div>
+  </header>
+  <main class="container">
+    <div class="page-head">
+      <h2>مساحاتي</h2>
+      <div class="head-buttons">
+        <button class="btn primary" id="new-space-btn">+ مساحة جديدة</button>
+        <button class="btn ghost" id="join-space-btn">انضمام برمز</button>
+      </div>
+    </div>
+    <div id="spaces-list" class="grid"></div>
+    <p id="spaces-empty" class="empty hidden">لا توجد مساحات بعد. أنشئ مساحة جديدة أو انضم إلى مساحة بالرمز.</p>
+  </main>
+</section>
+
+<!-- تفاصيل المساحة -->
+<section id="space-screen" class="screen">
+  <header class="topbar">
+    <div class="brand-small">
+      <button class="btn ghost" id="back-btn">رجوع</button>
+    </div>
+    <div class="top-actions">
+      <span id="space-role" class="badge"></span>
+    </div>
+  </header>
+  <main class="container">
+    <div class="space-head">
+      <div>
+        <h2 id="space-name"></h2>
+        <p class="muted" id="space-desc"></p>
+      </div>
+      <div class="invite-box" id="invite-box">
+        <span class="muted">رمز الدعوة</span>
+        <strong id="invite-code" dir="ltr"></strong>
+        <button class="btn small" id="copy-code-btn">نسخ</button>
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="col-main">
+        <div class="page-head">
+          <h3>المهام</h3>
+          <div class="filters" id="filters">
+            <button class="chip active" data-filter="all">الكل</button>
+            <button class="chip" data-filter="todo">لم تبدأ</button>
+            <button class="chip" data-filter="doing">قيد التنفيذ</button>
+            <button class="chip" data-filter="done">مكتملة</button>
+          </div>
+        </div>
+        <div id="tasks-list" class="tasks"></div>
+        <p id="tasks-empty" class="empty hidden">لا توجد مهام في هذا التصنيف.</p>
+      </div>
+
+      <aside class="col-side">
+        <div class="panel" id="new-task-panel">
+          <h3>مهمة جديدة</h3>
+          <form id="task-form" class="form">
+            <label>عنوان المهمة
+              <input type="text" name="title" required maxlength="120">
+            </label>
+            <label>التفاصيل
+              <textarea name="details" rows="3" maxlength="1000"></textarea>
+            </label>
+            <fieldset class="assignees">
+              <legend>تعيين إلى</legend>
+              <div id="assignee-options"></div>
+            </fieldset>
+            <button class="btn primary block" type="submit">إضافة المهمة</button>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h3>الأعضاء</h3>
+          <ul id="members-list" class="members"></ul>
+        </div>
+      </aside>
+    </div>
+  </main>
+</section>
+
+<!-- نوافذ حوارية -->
+<div class="modal hidden" id="modal">
+  <div class="modal-card">
+    <h3 id="modal-title"></h3>
+    <form id="modal-form" class="form"></form>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>/* inlined app.js */
+(function () {
+  'use strict';
+
+  // ---------- التخزين في المتصفح مع احتياط ----------
+  var memory = {};
+  var KEY = 'fariqna-db-v1';
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      return raw ? JSON.parse(raw) : { users: [], spaces: [], members: [], tasks: [], session: null };
+    } catch (e) {
+      return memory.db || { users: [], spaces: [], members: [], tasks: [], session: null };
+    }
+  }
+  function save(db) {
+    memory.db = db;
+    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* يبقى في الذاكرة */ }
+  }
+  var db = load();
+
+  function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
+  function code() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', s = '';
+    for (var i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+  function hash(str) { // تجزئة بسيطة للعرض التجريبي فقط
+    var h = 0;
+    for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+    return 'h' + (h >>> 0).toString(16);
+  }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  var STATUS = { todo: 'لم تبدأ', doing: 'قيد التنفيذ', done: 'مكتملة' };
+  var state = { view: 'auth', spaceId: null, filter: 'all' };
+
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { t.classList.remove('show'); }, 2200);
+  }
+  function show(view) {
+    ['auth-screen', 'spaces-screen', 'space-screen'].forEach(function (id) {
+      $(id).classList.remove('active');
+    });
+    var map = { auth: 'auth-screen', spaces: 'spaces-screen', space: 'space-screen' };
+    $(map[view]).classList.add('active');
+    state.view = view;
+    window.scrollTo(0, 0);
+  }
+  function me() { return db.users.find(function (u) { return u.id === db.session; }) || null; }
+  function myMembership(spaceId) {
+    var u = me();
+    return u ? db.members.find(function (m) { return m.spaceId === spaceId && m.userId === u.id; }) : null;
+  }
+  function openModal(title, html, onSubmit) {
+    $('modal-title').textContent = title;
+    var f = $('modal-form');
+    f.innerHTML = html + '<div class="modal-actions"><button class="btn primary" type="submit">تأكيد</button><button class="btn ghost" type="button" id="modal-cancel">إلغاء</button></div>';
+    $('modal').classList.remove('hidden');
+    $('modal-cancel').onclick = closeModal;
+    f.onsubmit = function (e) { e.preventDefault(); onSubmit(new FormData(f)); };
+    var first = f.querySelector('input'); if (first) first.focus();
+  }
+  function closeModal() { $('modal').classList.add('hidden'); }
+
+  // ---------- الحسابات ----------
+  $('auth-screen').addEventListener('click', function (e) {
+    var tab = e.target.closest('.tab');
+    if (!tab) return;
+    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t === tab); });
+    $('login-form').classList.toggle('hidden', tab.dataset.tab !== 'login');
+    $('signup-form').classList.toggle('hidden', tab.dataset.tab !== 'signup');
+    $('auth-error').textContent = '';
+  });
+
+  $('signup-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var fd = new FormData(this);
+    var email = String(fd.get('email')).trim().toLowerCase();
+    if (db.users.some(function (u) { return u.email === email; })) {
+      $('auth-error').textContent = 'هذا البريد مسجل مسبقاً. سجّل الدخول بدلاً من ذلك.';
+      return;
+    }
+    var user = { id: uid(), name: String(fd.get('name')).trim(), email: email, pass: hash(String(fd.get('password'))) };
+    db.users.push(user); db.session = user.id; save(db);
+    this.reset(); enterApp();
+    toast('أهلاً ' + user.name + '، تم إنشاء حسابك');
+  });
+
+  $('login-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var fd = new FormData(this);
+    var email = String(fd.get('email')).trim().toLowerCase();
+    var user = db.users.find(function (u) { return u.email === email; });
+    if (!user || user.pass !== hash(String(fd.get('password')))) {
+      $('auth-error').textContent = 'البريد أو كلمة المرور غير صحيحة.';
+      return;
+    }
+    db.session = user.id; save(db);
+    this.reset(); enterApp();
+  });
+
+  $('logout-btn').addEventListener('click', function () {
+    db.session = null; save(db); show('auth');
+  });
+
+  // ---------- قائمة المساحات ----------
+  function enterApp() {
+    var u = me();
+    $('user-name').textContent = u.name;
+    renderSpaces(); show('spaces');
+  }
+
+  function renderSpaces() {
+    var u = me();
+    var mine = db.members.filter(function (m) { return m.userId === u.id; });
+    var list = $('spaces-list');
+    list.innerHTML = '';
+    mine.forEach(function (m) {
+      var s = db.spaces.find(function (x) { return x.id === m.spaceId; });
+      if (!s) return;
+      var count = db.members.filter(function (x) { return x.spaceId === s.id; }).length;
+      var tasks = db.tasks.filter(function (t) { return t.spaceId === s.id; }).length;
+      var card = document.createElement('div');
+      card.className = 'space-card';
+      card.innerHTML = '<h3>' + esc(s.name) + '</h3>' +
+        '<span class="badge ' + (m.role === 'admin' ? '' : 'member') + '">' + (m.role === 'admin' ? 'مدير' : 'عضو') + '</span>' +
+        '<div class="meta"><span>' + count + ' أعضاء</span><span>' + tasks + ' مهام</span></div>';
+      card.onclick = function () { openSpace(s.id); };
+      list.appendChild(card);
+    });
+    $('spaces-empty').classList.toggle('hidden', mine.length > 0);
+  }
+
+  $('new-space-btn').addEventListener('click', function () {
+    openModal('مساحة جديدة', '<label>اسم المساحة<input name="name" required maxlength="40"></label>' +
+      '<label>وصف مختصر<input name="desc" maxlength="120"></label>', function (fd) {
+      var name = String(fd.get('name')).trim();
+      if (!name) return;
+      var space = { id: uid(), name: name, desc: String(fd.get('desc') || '').trim(), code: code(), adminId: me().id };
+      db.spaces.push(space);
+      db.members.push({ id: uid(), spaceId: space.id, userId: me().id, role: 'admin' });
+      save(db); closeModal(); renderSpaces(); openSpace(space.id);
+      toast('تم إنشاء المساحة، رمز الدعوة: ' + space.code);
+    });
+  });
+
+  $('join-space-btn').addEventListener('click', function () {
+    openModal('الانضمام برمز', '<label>رمز الدعوة<input name="code" required maxlength="6" dir="ltr" style="text-transform:uppercase"></label>', function (fd) {
+      var c = String(fd.get('code')).trim().toUpperCase();
+      var s = db.spaces.find(function (x) { return x.code === c; });
+      if (!s) { toast('الرمز غير صحيح'); return; }
+      if (!myMembership(s.id)) {
+        db.members.push({ id: uid(), spaceId: s.id, userId: me().id, role: 'member' });
+        save(db);
+      }
+      closeModal(); renderSpaces(); openSpace(s.id);
+      toast('تم انضمامك إلى ' + s.name);
+    });
+  });
+
+  // ---------- تفاصيل المساحة ----------
+  function openSpace(id) {
+    state.spaceId = id; state.filter = 'all';
+    renderSpace(); show('space');
+  }
+
+  $('back-btn').addEventListener('click', function () { renderSpaces(); show('spaces'); });
+
+  $('copy-code-btn').addEventListener('click', function () {
+    var s = db.spaces.find(function (x) { return x.id === state.spaceId; });
+    if (!s) return;
+    if (navigator.clipboard) navigator.clipboard.writeText(s.code).then(function () { toast('تم نسخ الرمز'); }, function () { toast('الرمز: ' + s.code); });
+    else toast('الرمز: ' + s.code);
+  });
+
+  $('filters').addEventListener('click', function (e) {
+    var chip = e.target.closest('.chip');
+    if (!chip) return;
+    state.filter = chip.dataset.filter;
+    document.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
+    renderTasks();
+  });
+
+  function renderSpace() {
+    var s = db.spaces.find(function (x) { return x.id === state.spaceId; });
+    var m = myMembership(state.spaceId);
+    if (!s || !m) { renderSpaces(); show('spaces'); return; }
+    var isAdmin = m.role === 'admin';
+    $('space-name').textContent = s.name;
+    $('space-desc').textContent = s.desc || '';
+    $('space-role').textContent = isAdmin ? 'مدير' : 'عضو';
+    $('space-role').className = 'badge' + (isAdmin ? '' : ' member');
+    $('invite-code').textContent = isAdmin ? s.code : '••••••';
+    $('invite-box').classList.toggle('hidden', !isAdmin);
+    $('new-task-panel').classList.toggle('hidden', !isAdmin);
+
+    var opts = db.members.filter(function (x) { return x.spaceId === s.id; }).map(function (x) {
+      var u = db.users.find(function (y) { return y.id === x.userId; });
+      return '<label class="check"><input type="checkbox" name="assignee" value="' + x.userId + '"> ' + esc(u ? u.name : '') + '</label>';
+    }).join('');
+    $('assignee-options').innerHTML = opts;
+
+    renderTasks(); renderMembers();
+  }
+
+  function renderTasks() {
+    var s = state.spaceId;
+    var list = db.tasks.filter(function (t) { return t.spaceId === s; })
+      .filter(function (t) { return state.filter === 'all' || t.status === state.filter; });
+    var m = myMembership(s);
+    var isAdmin = m && m.role === 'admin';
+    var box = $('tasks-list');
+    box.innerHTML = '';
+    list.forEach(function (t) {
+      var names = t.assignees.map(function (uid2) {
+        var u = db.users.find(function (y) { return y.id === uid2; }); return u ? u.name : '';
+      }).filter(Boolean).join('، ') || 'غير معيّنة';
+      var mine = t.assignees.indexOf(me().id) !== -1 || isAdmin;
+      var statusBtns = Object.keys(STATUS).map(function (k) {
+        return '<button class="status-btn ' + k + (t.status === k ? ' on' : '') + '" data-id="' + t.id + '" data-status="' + k + '"' +
+          (mine ? '' : ' disabled') + '>' + STATUS[k] + '</button>';
+      }).join('');
+      var done = t.completedBy ? '<span>أنجزها: ' + esc(t.completedBy) + '</span>' : '';
+      var el = document.createElement('article');
+      el.className = 'task ' + t.status;
+      el.innerHTML = '<h4 class="task-title">' + esc(t.title) + '</h4>' +
+        (t.details ? '<p class="task-details">' + esc(t.details) + '</p>' : '') +
+        '<div class="task-meta"><span>المعيّنون: ' + esc(names) + '</span>' + done + '</div>' +
+        '<div class="task-row"><div class="status-group">' + statusBtns + '</div>' +
+        (isAdmin ? '<button class="icon-btn" data-del="' + t.id + '">حذف</button>' : '') + '</div>';
+      box.appendChild(el);
+    });
+    $('tasks-empty').classList.toggle('hidden', list.length > 0);
+  }
+
+  $('tasks-list').addEventListener('click', function (e) {
+    var sb = e.target.closest('[data-status]');
+    if (sb && !sb.disabled) {
+      var t = db.tasks.find(function (x) { return x.id === sb.dataset.id; });
+      if (!t) return;
+      t.status = sb.dataset.status;
+      t.completedBy = t.status === 'done' ? me().name : null;
+      save(db); renderTasks(); toast('تم تحديث الحالة');
+      return;
+    }
+    var del = e.target.closest('[data-del]');
+    if (del) {
+      var m = myMembership(state.spaceId);
+      if (!m || m.role !== 'admin') return;
+      db.tasks = db.tasks.filter(function (x) { return x.id !== del.dataset.del; });
+      save(db); renderTasks(); renderSpaces(); toast('تم حذف المهمة');
+    }
+  });
+
+  $('task-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var m = myMembership(state.spaceId);
+    if (!m || m.role !== 'admin') { toast('المدير فقط يستطيع إنشاء المهام'); return; }
+    var fd = new FormData(this);
+    var assignees = Array.prototype.map.call(this.querySelectorAll('input[name="assignee"]:checked'), function (c) { return c.value; });
+    db.tasks.push({
+      id: uid(), spaceId: state.spaceId, title: String(fd.get('title')).trim(),
+      details: String(fd.get('details') || '').trim(), assignees: assignees,
+      status: 'todo', completedBy: null
+    });
+    save(db); this.reset(); renderTasks(); renderSpaces(); toast('تمت إضافة المهمة');
+  });
+
+  function renderMembers() {
+    var m = myMembership(state.spaceId);
+    var isAdmin = m && m.role === 'admin';
+    var ul = $('members-list');
+    ul.innerHTML = '';
+    db.members.filter(function (x) { return x.spaceId === state.spaceId; }).forEach(function (x) {
+      var u = db.users.find(function (y) { return y.id === x.userId; });
+      if (!u) return;
+      var count = db.tasks.filter(function (t) { return t.spaceId === state.spaceId && t.status === 'done' && t.completedBy === u.name; }).length;
+      var li = document.createElement('li');
+      li.innerHTML = '<div class="member-info"><span class="avatar">' + esc(u.name.charAt(0)) + '</span><span>' + esc(u.name) + '</span></div>' +
+        '<span class="stat">' + (x.role === 'admin' ? 'مدير' : count + ' مهمة مكتملة') + '</span>';
+      ul.appendChild(li);
+    });
+    if (isAdmin) { /* المدير يرى الإنجاز في القائمة */ }
+  }
+
+  // ---------- بدء التطبيق ----------
+  if (db.session && me()) { enterApp(); } else { show('auth'); }
+})();
+
+</script>
+<style>
+/* سيتم تعريف التنسيق في style.css */
+</style>
+</body>
+</html>
