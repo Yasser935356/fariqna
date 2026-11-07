@@ -3,7 +3,7 @@ import { Client, TablesDB } from "node-appwrite";
 export default async ({ req, res, log, error }) => {
   try {
     const client = new Client()
-      .setEndpoint(process.env.APPWRITE_FUNCTION_API_ENDPOINT)
+      .setEndpoint("https://fra.cloud.appwrite.io/v1")
       .setProject(process.env.APPWRITE_FUNCTION_PROJECT_ID)
      .setKey(process.env.FARIQNA_API_KEY);
 
