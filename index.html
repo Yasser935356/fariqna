@@ -247,6 +247,20 @@ textarea { resize: vertical; }
 }
 
 </style>
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@29.0.0"></script>
+<script>
+  const client = new Appwrite.Client();
+
+  client
+    .setEndpoint("https://fra.cloud.appwrite.io/v1")
+    .setProject("6aef1d79003afe64d4e5");
+
+  window.fariqna = {
+    client,
+    account: new Appwrite.Account(client),
+    ID: Appwrite.ID
+  };
+</script>
 </head>
 <body>
 
