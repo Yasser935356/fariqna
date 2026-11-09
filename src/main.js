@@ -101,6 +101,77 @@ if (body?.action === "listWorkspaces") {
     workspaces
   });
 }
+    if (body?.action === "joinWorkspace") {
+  const inviteCode = typeof body.code === "string"
+    ? body.code.trim().toUpperCase()
+    : "";
+
+  if (!/^[A-HJ-NP-Z2-9]{6}$/.test(inviteCode)) {
+    return res.json({
+      success: false,
+      message: "رمز الدعوة غير صحيح"
+    }, 400);
+  }
+
+  const found = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: WORKSPACES_ID,
+    queries: [
+      Query.equal("inviteCode", inviteCode),
+      Query.limit(2)
+    ]
+  });
+
+  if (found.rows.length !== 1) {
+    return res.json({
+      success: false,
+      message: "رمز الدعوة غير صحيح"
+    }, 404);
+  }
+
+  const workspace = found.rows[0];
+
+  const memberships = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("workspaceId", workspace.$id),
+      Query.equal("userId", user.$id),
+      Query.limit(1)
+    ]
+  });
+
+  let role = "member";
+
+  if (memberships.rows.length === 0) {
+    await tables.createRow({
+      databaseId: DATABASE_ID,
+      tableId: MEMBERS_ID,
+      rowId: ID.unique(),
+      data: {
+        workspaceId: workspace.$id,
+        userId: user.$id,
+        role: "member",
+        joinedAt: new Date().toISOString()
+      },
+      permissions: []
+    });
+  } else {
+    role = memberships.rows[0].role;
+  }
+
+  return res.json({
+    success: true,
+    message: "تم الانضمام إلى الغرفة بنجاح",
+    workspace: {
+      id: workspace.$id,
+      name: workspace.name,
+      desc: workspace.desc,
+      adminId: workspace.ownerId,
+      role: role
+    }
+  });
+}
     if (!body || body.action !== "createWorkspace") {
       return res.json({
         success: false,
