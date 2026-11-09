@@ -560,20 +560,73 @@ textarea { resize: vertical; }
   $('logout-btn').addEventListener('click', async function () {
     try {
       await account.deleteSession({ sessionId: 'current' });
-      db.session = null;
-      save(db);
-      show('auth');
-    } catch (err) {
-      toast('تعذر تسجيل الخروج');
-    }
-  });
+function enterApp() {
+  var u = me();
+  $('user-name').textContent = u.name;
+  renderSpaces();
+  show('spaces');
 
-  // ---------- قائمة المساحات ----------
-  function enterApp() {
-    var u = me();
-    $('user-name').textContent = u.name;
-    renderSpaces(); show('spaces');
-  }
+  var functions = new Appwrite.Functions(window.fariqna.client);
+
+  functions.createExecution({
+    functionId: "6aef48cf0019c49d0ddd",
+    body: JSON.stringify({
+      action: "listWorkspaces"
+    }),
+    async: false,
+    headers: {
+      "content-type": "application/json"
+    }
+  }).then(function (execution) {
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success || !Array.isArray(result.workspaces)) {
+      throw new Error(result.message || "فشل استرجاع الغرف");
+    }
+
+    result.workspaces.forEach(function (space) {
+      var existing = db.spaces.find(function (s) {
+        return s.id === space.id;
+      });
+
+      if (existing) {
+        existing.name = space.name;
+        existing.desc = space.desc;
+        existing.adminId = space.adminId;
+        if (space.code) existing.code = space.code;
+      } else {
+        db.spaces.push({
+          id: space.id,
+          name: space.name,
+          desc: space.desc,
+          code: space.code || "",
+          adminId: space.adminId
+        });
+      }
+
+      var membership = db.members.find(function (m) {
+        return m.spaceId === space.id && m.userId === u.id;
+      });
+
+      if (membership) {
+        membership.role = space.role;
+      } else {
+        db.members.push({
+          id: uid(),
+          spaceId: space.id,
+          userId: u.id,
+          role: space.role
+        });
+      }
+    });
+
+    save(db);
+    renderSpaces();
+
+  }).catch(function (err) {
+    toast("تعذر استرجاع الغرف: " + err.message);
+  });
+}
 
   function renderSpaces() {
     var u = me();
