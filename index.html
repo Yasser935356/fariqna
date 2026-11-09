@@ -560,6 +560,15 @@ textarea { resize: vertical; }
   $('logout-btn').addEventListener('click', async function () {
     try {
       await account.deleteSession({ sessionId: 'current' });
+       db.session = null;
+      save(db);
+      show('auth');
+    } catch (err) {
+      toast('تعذر تسجيل الخروج');
+    }
+  });
+
+  // ---------- قائمة المساحات ----------     
 function enterApp() {
   var u = me();
   $('user-name').textContent = u.name;
