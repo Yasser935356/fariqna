@@ -601,11 +601,50 @@ textarea { resize: vertical; }
       '<label>وصف مختصر<input name="desc" maxlength="120"></label>', function (fd) {
       var name = String(fd.get('name')).trim();
       if (!name) return;
-      var space = { id: uid(), name: name, desc: String(fd.get('desc') || '').trim(), code: code(), adminId: me().id };
-      db.spaces.push(space);
-      db.members.push({ id: uid(), spaceId: space.id, userId: me().id, role: 'admin' });
-      save(db); closeModal(); renderSpaces(); openSpace(space.id);
-      toast('تم إنشاء المساحة، رمز الدعوة: ' + space.code);
+      var desc = String(fd.get('desc') || '').trim();
+      var btn = $('modal-form').querySelector('[type="submit"]');
+      if (btn.disabled) return;
+      btn.disabled = true;
+
+      var functions = new Appwrite.Functions(window.fariqna.client);
+
+      functions.createExecution({
+        functionId: "6aef48cf0019c49d0ddd",
+        body: JSON.stringify({
+          action: "createWorkspace",
+          name: name,
+          desc: desc
+        }),
+        async: false,
+        headers: { "content-type": "application/json" }
+      }).then(function (execution) {
+        var result = JSON.parse(execution.responseBody || '{}');
+
+        if (!result.success || !result.workspace) {
+          throw new Error(result.message || 'تعذر إنشاء الغرفة');
+        }
+
+        var space = result.workspace;
+
+        db.spaces.push(space);
+        db.members.push({
+          id: uid(),
+          spaceId: space.id,
+          userId: me().id,
+          role: 'admin'
+        });
+
+        save(db);
+        closeModal();
+        renderSpaces();
+        openSpace(space.id);
+
+        toast('تم إنشاء المساحة، رمز الدعوة: ' + space.code);
+      }).catch(function (err) {
+        toast(err.message || 'حدث خطأ أثناء إنشاء الغرفة');
+      }).finally(function () {
+        btn.disabled = false;
+      });
     });
   });
 
