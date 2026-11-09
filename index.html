@@ -292,8 +292,8 @@ textarea { resize: vertical; }
       <label>البريد الإلكتروني
         <input type="email" name="email" required autocomplete="email">
       </label>
-      <label>كلمة المرور (6 أحرف على الأقل)
-        <input type="password" name="password" required minlength="6" autocomplete="new-password">
+      <label>كلمة المرور (8 أحرف على الأقل)
+        <input type="password" name="password" required minlength="8" autocomplete="new-password">
       </label>
       <button class="btn primary block" type="submit">إنشاء الحساب</button>
     </form>
@@ -481,35 +481,91 @@ textarea { resize: vertical; }
     $('auth-error').textContent = '';
   });
 
-  $('signup-form').addEventListener('submit', function (e) {
+  // ---------- الحسابات الحقيقية عبر Appwrite ----------
+  var account = window.fariqna.account;
+
+  function saveUser(appUser) {
+    var user = {
+      id: appUser.$id,
+      name: appUser.name,
+      email: appUser.email
+    };
+
+    db.users = db.users.filter(function (u) {
+      return u.id !== user.id;
+    });
+
+    db.users.push(user);
+    db.session = user.id;
+    save(db);
+    return user;
+  }
+
+  $('signup-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     var fd = new FormData(this);
+    var name = String(fd.get('name')).trim();
     var email = String(fd.get('email')).trim().toLowerCase();
-    if (db.users.some(function (u) { return u.email === email; })) {
-      $('auth-error').textContent = 'هذا البريد مسجل مسبقاً. سجّل الدخول بدلاً من ذلك.';
+    var password = String(fd.get('password'));
+
+    $('auth-error').textContent = '';
+
+    if (password.length < 8) {
+      $('auth-error').textContent = 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.';
       return;
     }
-    var user = { id: uid(), name: String(fd.get('name')).trim(), email: email, pass: hash(String(fd.get('password'))) };
-    db.users.push(user); db.session = user.id; save(db);
-    this.reset(); enterApp();
-    toast('أهلاً ' + user.name + '، تم إنشاء حسابك');
+
+    try {
+      await account.create({
+        userId: Appwrite.ID.unique(),
+        email: email,
+        password: password,
+        name: name
+      });
+
+      await account.createEmailPasswordSession({
+        email: email,
+        password: password
+      });
+
+      var user = saveUser(await account.get());
+      this.reset();
+      enterApp();
+      toast('تم إنشاء حسابك بنجاح، أهلاً ' + user.name);
+    } catch (err) {
+      $('auth-error').textContent = err.message || 'حدث خطأ أثناء إنشاء الحساب';
+    }
   });
 
-  $('login-form').addEventListener('submit', function (e) {
+  $('login-form').addEventListener('submit', async function (e) {
     e.preventDefault();
     var fd = new FormData(this);
-    var email = String(fd.get('email')).trim().toLowerCase();
-    var user = db.users.find(function (u) { return u.email === email; });
-    if (!user || user.pass !== hash(String(fd.get('password')))) {
-      $('auth-error').textContent = 'البريد أو كلمة المرور غير صحيحة.';
-      return;
+
+    $('auth-error').textContent = '';
+
+    try {
+      await account.createEmailPasswordSession({
+        email: String(fd.get('email')).trim().toLowerCase(),
+        password: String(fd.get('password'))
+      });
+
+      saveUser(await account.get());
+      this.reset();
+      enterApp();
+    } catch (err) {
+      $('auth-error').textContent = err.message || 'فشل تسجيل الدخول';
     }
-    db.session = user.id; save(db);
-    this.reset(); enterApp();
   });
 
-  $('logout-btn').addEventListener('click', function () {
-    db.session = null; save(db); show('auth');
+  $('logout-btn').addEventListener('click', async function () {
+    try {
+      await account.deleteSession({ sessionId: 'current' });
+      db.session = null;
+      save(db);
+      show('auth');
+    } catch (err) {
+      toast('تعذر تسجيل الخروج');
+    }
   });
 
   // ---------- قائمة المساحات ----------
@@ -693,7 +749,14 @@ textarea { resize: vertical; }
   }
 
   // ---------- بدء التطبيق ----------
-  if (db.session && me()) { enterApp(); } else { show('auth'); }
+ account.get().then(function (appUser) {
+  saveUser(appUser);
+  enterApp();
+}).catch(function () {
+  db.session = null;
+  save(db);
+  show('auth');
+});
 })();
 
 </script>
