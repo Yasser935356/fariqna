@@ -4,7 +4,8 @@ import { randomInt } from "node:crypto";
 const DATABASE_ID = "6aef1e2d000fb1f56fdd";
 const WORKSPACES_ID = "6aef1fdf0036603f6755";
 const MEMBERS_ID = "6aef25b4002952a7a5ff";
-
+const TASKS_ID = "6aef29b0001e100d5905";
+const TASK_ASSIGNEES_ID = "6aef2c360036aa8a7879";
 function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let result = "";
@@ -170,6 +171,78 @@ if (body?.action === "listWorkspaces") {
       adminId: workspace.ownerId,
       role: role
     }
+  });
+}
+    if (body?.action === "listTasks") {
+  const workspaceId = typeof body.workspaceId === "string"
+    ? body.workspaceId.trim()
+    : "";
+
+  if (!workspaceId) {
+    return res.json({
+      success: false,
+      message: "معرف الغرفة مطلوب"
+    }, 400);
+  }
+
+  const memberships = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("workspaceId", workspaceId),
+      Query.equal("userId", user.$id),
+      Query.limit(1)
+    ]
+  });
+
+  if (memberships.rows.length === 0) {
+    return res.json({
+      success: false,
+      message: "ليس لديك صلاحية لعرض مهام هذه الغرفة"
+    }, 403);
+  }
+
+  const taskRows = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: TASKS_ID,
+    queries: [
+      Query.equal("workspaceId", workspaceId),
+      Query.limit(100)
+    ]
+  });
+
+  const taskIds = taskRows.rows.map(task => task.$id);
+
+  let assignees = [];
+
+  if (taskIds.length > 0) {
+    const result = await tables.listRows({
+      databaseId: DATABASE_ID,
+      tableId: TASK_ASSIGNEES_ID,
+      queries: [
+        Query.equal("taskId", taskIds),
+        Query.limit(100)
+      ]
+    });
+
+    assignees = result.rows;
+  }
+
+  const tasks = taskRows.rows.map(task => ({
+    id: task.$id,
+    spaceId: task.workspaceId,
+    title: task.title,
+    details: task.description || "",
+    status: task.status,
+    createdBy: task.createdBy,
+    assignees: assignees
+      .filter(a => a.taskId === task.$id)
+      .map(a => a.userId)
+  }));
+
+  return res.json({
+    success: true,
+    tasks
   });
 }
     if (!body || body.action !== "createWorkspace") {
