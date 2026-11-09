@@ -1,4 +1,4 @@
-import { Client, Account, TablesDB, ID } from "node-appwrite";
+import { Client, Account, TablesDB, ID, Query } from "node-appwrite";
 import { randomInt } from "node:crypto";
 
 const DATABASE_ID = "6aef1e2d000fb1f56fdd";
@@ -65,7 +65,42 @@ export default async ({ req, res, error }) => {
     const tables = new TablesDB(serverClient);
 
     const body = req.bodyJson;
+if (body?.action === "listWorkspaces") {
+  const memberships = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("userId", user.$id),
+      Query.limit(100)
+    ]
+  });
 
+  const workspaces = await Promise.all(
+    memberships.rows.map(async (member) => {
+      const workspace = await tables.getRow({
+        databaseId: DATABASE_ID,
+        tableId: WORKSPACES_ID,
+        rowId: member.workspaceId
+      });
+
+      return {
+        id: workspace.$id,
+        name: workspace.name,
+        desc: workspace.desc,
+        code: workspace.ownerId === user.$id
+          ? workspace.inviteCode
+          : null,
+        adminId: workspace.ownerId,
+        role: member.role
+      };
+    })
+  );
+
+  return res.json({
+    success: true,
+    workspaces
+  });
+}
     if (!body || body.action !== "createWorkspace") {
       return res.json({
         success: false,
