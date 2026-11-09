@@ -1,4 +1,4 @@
-import { Client, Account, TablesDB, ID, Query } from "node-appwrite";
+import { Client, Account, TablesDB, ID, Query, Users } from "node-appwrite";
 import { randomInt } from "node:crypto";
 
 const DATABASE_ID = "6aef1e2d000fb1f56fdd";
@@ -243,6 +243,68 @@ if (body?.action === "listWorkspaces") {
   return res.json({
     success: true,
     tasks
+  });
+}
+    if (body?.action === "listMembers") {
+  const workspaceId = typeof body.workspaceId === "string"
+    ? body.workspaceId.trim()
+    : "";
+
+  if (!workspaceId) {
+    return res.json({
+      success: false,
+      message: "معرف الغرفة مطلوب"
+    }, 400);
+  }
+
+  // التأكد أن المستخدم عضو في الغرفة
+  const access = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("workspaceId", workspaceId),
+      Query.equal("userId", user.$id),
+      Query.limit(1)
+    ]
+  });
+
+  if (access.rows.length === 0) {
+    return res.json({
+      success: false,
+      message: "ليس لديك صلاحية لعرض أعضاء هذه الغرفة"
+    }, 403);
+  }
+
+  // استرجاع الأعضاء
+  const membershipRows = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("workspaceId", workspaceId),
+      Query.limit(100)
+    ]
+  });
+
+  const users = new Users(serverClient);
+
+  const members = await Promise.all(
+    membershipRows.rows.map(async (member) => {
+      const memberUser = await users.get({
+        userId: member.userId
+      });
+
+      return {
+        userId: member.userId,
+        name: memberUser.name,
+        role: member.role,
+        joinedAt: member.joinedAt
+      };
+    })
+  );
+
+  return res.json({
+    success: true,
+    members: members
   });
 }
     if (!body || body.action !== "createWorkspace") {
