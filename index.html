@@ -806,10 +806,72 @@ $('join-space-btn').addEventListener('click', function () {
 });
 
   // ---------- تفاصيل المساحة ----------
-  function openSpace(id) {
-    state.spaceId = id; state.filter = 'all';
-    renderSpace(); show('space');
-  }
+function openSpace(id) {
+  state.spaceId = id;
+  state.filter = 'all';
+
+  renderSpace();
+  show('space');
+
+  var functions = new Appwrite.Functions(window.fariqna.client);
+
+  functions.createExecution({
+    functionId: "6aef48cf0019c49d0ddd",
+    body: JSON.stringify({
+      action: "listMembers",
+      workspaceId: id
+    }),
+    async: false,
+    headers: {
+      "content-type": "application/json"
+    }
+  }).then(function (execution) {
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success || !Array.isArray(result.members)) {
+      throw new Error(result.message || "تعذر استرجاع الأعضاء");
+    }
+
+    db.members = db.members.filter(function (m) {
+      return m.spaceId !== id;
+    });
+
+    result.members.forEach(function (member) {
+
+      var existingUser = db.users.find(function (u) {
+        return u.id === member.userId;
+      });
+
+      if (existingUser) {
+        existingUser.name = member.name;
+      } else {
+        db.users.push({
+          id: member.userId,
+          name: member.name,
+          email: ""
+        });
+      }
+
+      db.members.push({
+        id: uid(),
+        spaceId: id,
+        userId: member.userId,
+        role: member.role
+      });
+
+    });
+
+    save(db);
+
+    if (state.spaceId === id && state.view === "space") {
+      renderSpace();
+    }
+
+  }).catch(function (err) {
+    toast("تعذر استرجاع الأعضاء: " + err.message);
+  });
+}
 
   $('back-btn').addEventListener('click', function () { renderSpaces(); show('spaces'); });
 
