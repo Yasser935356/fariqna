@@ -250,6 +250,47 @@ textarea { resize: vertical; }
   color: #F3E8FF;
   font-size: 16px;
 }
+ /* رسمة الصاروخ في لوحة الترحيب */
+.welcome-banner {
+  position: relative;
+  overflow: hidden;
+  padding-left: 170px;
+}
+
+.welcome-art {
+  position: absolute;
+  left: 35px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.welcome-rocket {
+  display: block;
+  font-size: 80px;
+  transform: rotate(-15deg);
+}
+
+.welcome-sparkle {
+  position: absolute;
+  top: -15px;
+  right: -35px;
+  font-size: 28px;
+}
+
+@media (max-width: 520px) {
+  .welcome-banner {
+    padding-left: 30px;
+    padding-bottom: 135px;
+  }
+
+  .welcome-art {
+    left: 50%;
+    top: auto;
+    bottom: 10px;
+    transform: translateX(-50%);
+  }
+}
 /* الجوال */
 @media (max-width: 860px) {
   .layout { grid-template-columns: 1fr; }
@@ -339,6 +380,10 @@ textarea { resize: vertical; }
       </div>
     </div>
    <div class="welcome-banner">
+    <div class="welcome-art" aria-hidden="true">
+  <span class="welcome-rocket">🚀</span>
+  <span class="welcome-sparkle">✨⭐</span>
+</div>
   <h2>🚀 أهلًا بك في فريقنا!</h2>
   <p>تعاون مع فريقك، نظّم مهامك، وحققوا أهدافكم معًا! ✨</p>
 </div>
