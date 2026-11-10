@@ -307,6 +307,145 @@ if (body?.action === "listWorkspaces") {
     members: members
   });
 }
+    if (body?.action === "createTask") {
+  const workspaceId = typeof body.workspaceId === "string"
+    ? body.workspaceId.trim()
+    : "";
+
+  const title = typeof body.title === "string"
+    ? body.title.trim()
+    : "";
+
+  const description = typeof body.description === "string"
+    ? body.description.trim()
+    : "";
+
+  const assignees = Array.isArray(body.assignees)
+    ? [...new Set(body.assignees)]
+    : [];
+
+  if (
+    !workspaceId ||
+    !title ||
+    title.length > 120 ||
+    description.length > 1000 ||
+    assignees.length > 50 ||
+    assignees.some(id => typeof id !== "string" || !id)
+  ) {
+    return res.json({
+      success: false,
+      message: "تحقق من بيانات المهمة"
+    }, 400);
+  }
+
+  const membership = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("workspaceId", workspaceId),
+      Query.equal("userId", user.$id),
+      Query.limit(1)
+    ]
+  });
+
+  if (membership.rows[0]?.role !== "admin") {
+    return res.json({
+      success: false,
+      message: "مدير الغرفة فقط يستطيع إنشاء المهام"
+    }, 403);
+  }
+
+  if (assignees.length > 0) {
+    const members = await tables.listRows({
+      databaseId: DATABASE_ID,
+      tableId: MEMBERS_ID,
+      queries: [
+        Query.equal("workspaceId", workspaceId),
+        Query.equal("userId", assignees),
+        Query.limit(100)
+      ]
+    });
+
+    const validIds = new Set(
+      members.rows.map(member => member.userId)
+    );
+
+    if (assignees.some(id => !validIds.has(id))) {
+      return res.json({
+        success: false,
+        message: "أحد المكلفين ليس عضوًا في الغرفة"
+      }, 400);
+    }
+  }
+
+  const task = await tables.createRow({
+    databaseId: DATABASE_ID,
+    tableId: TASKS_ID,
+    rowId: ID.unique(),
+    data: {
+      workspaceId,
+      title,
+      description,
+      status: "todo",
+      createdBy: user.$id,
+      createdAt: new Date().toISOString()
+    },
+    permissions: []
+  });
+
+  const createdAssignments = [];
+
+  try {
+    for (const userId of assignees) {
+      const assignment = await tables.createRow({
+        databaseId: DATABASE_ID,
+        tableId: TASK_ASSIGNEES_ID,
+        rowId: ID.unique(),
+        data: {
+          taskId: task.$id,
+          userId
+        },
+        permissions: []
+      });
+
+      createdAssignments.push(assignment.$id);
+    }
+  } catch (err) {
+    for (const rowId of createdAssignments) {
+      try {
+        await tables.deleteRow({
+          databaseId: DATABASE_ID,
+          tableId: TASK_ASSIGNEES_ID,
+          rowId
+        });
+      } catch (_) {}
+    }
+
+    try {
+      await tables.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId: TASKS_ID,
+        rowId: task.$id
+      });
+    } catch (_) {}
+
+    throw err;
+  }
+
+  return res.json({
+    success: true,
+    message: "تم إنشاء المهمة بنجاح",
+    task: {
+      id: task.$id,
+      spaceId: workspaceId,
+      title,
+      details: description,
+      status: "todo",
+      assignees,
+      completedBy: null
+    }
+  });
+}
     if (!body || body.action !== "createWorkspace") {
       return res.json({
         success: false,
