@@ -307,7 +307,88 @@ if (body?.action === "listWorkspaces") {
     members: members
   });
 }
-    if (body?.action === "createTask") {
+          // ---------- تحديث حالة المهمة ----------
+    if (body?.action === "updateTask") {
+      const taskId = typeof body.taskId === "string"
+        ? body.taskId.trim()
+        : "";
+
+      const status = body.status;
+
+      if (!taskId || !["todo", "doing", "done"].includes(status)) {
+        return res.json({
+          success: false,
+          message: "بيانات تحديث المهمة غير صحيحة"
+        }, 400);
+      }
+
+      const task = await tables.getRow({
+        databaseId: DATABASE_ID,
+        tableId: TASKS_ID,
+        rowId: taskId
+      });
+
+      // التأكد أن المستخدم عضو في الغرفة
+      const memberships = await tables.listRows({
+        databaseId: DATABASE_ID,
+        tableId: MEMBERS_ID,
+        queries: [
+          Query.equal("workspaceId", task.workspaceId),
+          Query.equal("userId", user.$id),
+          Query.limit(1)
+        ]
+      });
+
+      if (!memberships.rows.length) {
+        return res.json({
+          success: false,
+          message: "ليس لديك صلاحية لتحديث هذه المهمة"
+        }, 403);
+      }
+
+      const isAdmin = memberships.rows[0].role === "admin";
+
+      // العضو العادي يعدل المهام المعيّنة له فقط
+      if (!isAdmin) {
+        const assignments = await tables.listRows({
+          databaseId: DATABASE_ID,
+          tableId: TASK_ASSIGNEES_ID,
+          queries: [
+            Query.equal("taskId", taskId),
+            Query.equal("userId", user.$id),
+            Query.limit(1)
+          ]
+        });
+
+        if (!assignments.rows.length) {
+          return res.json({
+            success: false,
+            message: "هذه المهمة ليست معيّنة لك"
+          }, 403);
+        }
+      }
+
+      // حفظ الحالة الجديدة في قاعدة البيانات
+      const updatedTask = await tables.updateRow({
+        databaseId: DATABASE_ID,
+        tableId: TASKS_ID,
+        rowId: taskId,
+        data: {
+          status: status
+        }
+      });
+
+      return res.json({
+        success: true,
+        message: "تم تحديث حالة المهمة",
+        task: {
+          id: updatedTask.$id,
+          spaceId: updatedTask.workspaceId,
+          status: updatedTask.status
+        }
+      });
+    }
+        if (body?.action === "createTask") {
   const workspaceId = typeof body.workspaceId === "string"
     ? body.workspaceId.trim()
     : "";
