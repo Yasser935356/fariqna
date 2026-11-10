@@ -428,6 +428,22 @@ textarea { resize: vertical; }
         </div>
         <div id="tasks-list" class="tasks"></div>
         <p id="tasks-empty" class="empty hidden">لا توجد مهام في هذا التصنيف.</p>
+       <section id="room-chat-panel" class="panel" style="margin-top: 20px;">
+  <h3>💬 المحادثة العامة للغرفة</h3>
+
+  <div id="room-messages" class="chat-messages">
+    <p class="muted">لا توجد رسائل حتى الآن.</p>
+  </div>
+
+  <form id="room-chat-form" class="form">
+    <label>اكتب رسالتك
+      <textarea name="message" rows="2" maxlength="2000"
+                placeholder="اكتب رسالة لأعضاء الغرفة..." required></textarea>
+    </label>
+
+    <button type="submit" class="btn primary">💬 إرسال</button>
+  </form>
+</section>
       </div>
 
       <aside class="col-side">
@@ -887,7 +903,7 @@ function openSpace(id) {
 
   renderSpace();
   show('space');
-
+loadRoomMessages();
   var functions = new Appwrite.Functions(window.fariqna.client);
 
   functions.createExecution({
@@ -1323,7 +1339,132 @@ dueAt: dueAt
     });
     if (isAdmin) { /* المدير يرى الإنجاز في القائمة */ }
   }
+// ---------- إرسال رسائل المحادثة العامة ----------
+$('room-chat-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
 
+  var form = this;
+  var message = String(new FormData(form).get('message') || '').trim();
+
+  if (!message) {
+    toast('اكتب رسالة أولًا');
+    return;
+  }
+
+  var btn = form.querySelector('button[type="submit"]');
+  if (btn.disabled) return;
+  btn.disabled = true;
+
+  try {
+    var functions = new Appwrite.Functions(window.fariqna.client);
+
+    var execution = await functions.createExecution({
+      functionId: "6aef48cf0019c49d0ddd",
+      body: JSON.stringify({
+        action: "sendMessage",
+        workspaceId: state.spaceId,
+        content: message,
+        messageType: "text"
+      }),
+      async: false,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success) {
+      throw new Error(result.message || "تعذر إرسال الرسالة");
+    }
+
+    form.reset();
+   loadRoomMessages();
+    toast('تم إرسال الرسالة بنجاح');
+
+  } catch (err) {
+    toast('تعذر إرسال الرسالة: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+ // ---------- عرض رسائل المحادثة العامة ----------
+async function loadRoomMessages() {
+  var workspaceId = state.spaceId;
+  var box = $('room-messages');
+
+  if (!workspaceId || !box) return;
+
+  box.textContent = 'جارٍ تحميل الرسائل...';
+
+  try {
+    var functions = new Appwrite.Functions(window.fariqna.client);
+
+    var execution = await functions.createExecution({
+      functionId: "6aef48cf0019c49d0ddd",
+      body: JSON.stringify({
+        action: "listMessages",
+        workspaceId: workspaceId
+      }),
+      async: false,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success || !Array.isArray(result.messages)) {
+      throw new Error(result.message || "تعذر تحميل الرسائل");
+    }
+
+    if (state.spaceId !== workspaceId) return;
+
+    box.innerHTML = '';
+
+    if (result.messages.length === 0) {
+      box.textContent = 'لا توجد رسائل حتى الآن.';
+      return;
+    }
+
+    result.messages.forEach(function (msg) {
+      var bubble = document.createElement('div');
+      bubble.className = 'chat-bubble';
+
+      if (msg.senderId === me().id) {
+        bubble.classList.add('mine');
+      }
+
+      var sender = db.users.find(function (u) {
+        return u.id === msg.senderId;
+      });
+
+      var name = document.createElement('div');
+      name.className = 'chat-name';
+      name.textContent = sender ? sender.name : 'عضو';
+
+      var content = document.createElement('div');
+      content.textContent = msg.content || '';
+      content.style.whiteSpace = 'pre-wrap';
+
+      var time = document.createElement('small');
+      time.className = 'muted';
+      time.textContent = new Date(msg.createdAt)
+        .toLocaleString('ar-SA');
+
+      bubble.appendChild(name);
+      bubble.appendChild(content);
+      bubble.appendChild(time);
+
+      box.appendChild(bubble);
+    });
+
+    box.scrollTop = box.scrollHeight;
+
+  } catch (err) {
+    box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
+  }
+}
   // ---------- بدء التطبيق ----------
  account.get().then(function (appUser) {
   saveUser(appUser);
@@ -1338,6 +1479,44 @@ dueAt: dueAt
 </script>
 <style>
 /* سيتم تعريف التنسيق في style.css */
+ /* 💬 تصميم المحادثات */
+#room-chat-panel {
+  margin-top: 20px;
+}
+
+.chat-messages {
+  min-height: 160px;
+  max-height: 350px;
+  overflow-y: auto;
+  padding: 15px;
+  margin: 15px 0;
+  background: #F7F5FF;
+  border: 1px solid #E6E0FA;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-bubble {
+  max-width: 85%;
+  padding: 12px;
+  background: white;
+  border: 1px solid #E6E0FA;
+  border-radius: 14px;
+  overflow-wrap: anywhere;
+}
+
+.chat-bubble.mine {
+  align-self: flex-end;
+  background: #EDE9FF;
+}
+
+.chat-bubble .chat-name {
+  color: #5B4FE8;
+  font-weight: bold;
+  font-size: 13px;
+}
 </style>
 </body>
 </html>
