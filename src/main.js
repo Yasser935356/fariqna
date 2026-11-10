@@ -233,6 +233,7 @@ if (body?.action === "listWorkspaces") {
     spaceId: task.workspaceId,
     title: task.title,
     details: task.description || "",
+    dueAt: task.dueAt || null,
     status: task.status,
     createdBy: task.createdBy,
     assignees: assignees
@@ -468,7 +469,18 @@ if (body?.action === "listWorkspaces") {
   const description = typeof body.description === "string"
     ? body.description.trim()
     : "";
+const dueAtValue = typeof body.dueAt === "string"
+  ? body.dueAt.trim()
+  : "";
 
+const dueAt = dueAtValue ? new Date(dueAtValue) : null;
+
+if (dueAt && Number.isNaN(dueAt.getTime())) {
+  return res.json({
+    success: false,
+    message: "موعد التسليم غير صحيح"
+  }, 400);
+}
   const assignees = Array.isArray(body.assignees)
     ? [...new Set(body.assignees)]
     : [];
@@ -537,7 +549,8 @@ if (body?.action === "listWorkspaces") {
       description,
       status: "todo",
       createdBy: user.$id,
-      createdAt: new Date().toISOString()
+     createdAt: new Date().toISOString(),
+...(dueAt ? { dueAt: dueAt.toISOString() } : {})
     },
     permissions: []
   });
@@ -591,6 +604,7 @@ if (body?.action === "listWorkspaces") {
       details: description,
       status: "todo",
       assignees,
+      dueAt: dueAt ? dueAt.toISOString() : null,
       completedBy: null
     }
   });
