@@ -895,9 +895,15 @@ function openSpace(id) {
       var existing = db.tasks.find(function (task) {
         return task.id === remoteTask.id;
       });
+      // تحديث المهام الموجودة وإضافة المهام الجديدة
+      if (existing) {
+        existing.status = remoteTask.status;
+        existing.assignees = remoteTask.assignees;
 
-      // إضافة المهام غير الموجودة فقط، لحماية التعديلات المحلية
-      if (!existing) {
+        if (remoteTask.status !== 'done') {
+          existing.completedBy = null;
+        }
+      } else {
         db.tasks.push(
           Object.assign({ completedBy: null }, remoteTask)
         );
@@ -988,14 +994,51 @@ function openSpace(id) {
     $('tasks-empty').classList.toggle('hidden', list.length > 0);
   }
 
-  $('tasks-list').addEventListener('click', function (e) {
+$('tasks-list').addEventListener('click', async function (e) {
     var sb = e.target.closest('[data-status]');
     if (sb && !sb.disabled) {
       var t = db.tasks.find(function (x) { return x.id === sb.dataset.id; });
       if (!t) return;
-      t.status = sb.dataset.status;
+    var newStatus = sb.dataset.status;
+    sb.disabled = true;
+
+    try {
+      var functions = new Appwrite.Functions(window.fariqna.client);
+
+      var execution = await functions.createExecution({
+        functionId: "6aef48cf0019c49d0ddd",
+        body: JSON.stringify({
+          action: "updateTask",
+          taskId: t.id,
+          status: newStatus
+        }),
+        async: false,
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+
+      var result = JSON.parse(execution.responseBody || "{}");
+
+      if (!result.success || !result.task) {
+        throw new Error(result.message || "تعذر تحديث المهمة");
+      }
+
+      t.status = result.task.status;
       t.completedBy = t.status === 'done' ? me().name : null;
-      save(db); renderTasks(); toast('تم تحديث الحالة');
+
+      save(db);
+      renderTasks();
+      renderMembers();
+
+      toast('تم تحديث حالة المهمة بنجاح');
+
+    } catch (err) {
+      toast('تعذر تحديث الحالة: ' + err.message);
+
+    } finally {
+      sb.disabled = false;
+    }
       return;
     }
     var del = e.target.closest('[data-del]');
