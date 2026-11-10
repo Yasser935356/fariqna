@@ -308,6 +308,74 @@ if (body?.action === "listWorkspaces") {
   });
 }
           // ---------- تحديث حالة المهمة ----------
+        // ---------- حذف المهمة ----------
+    if (body?.action === "deleteTask") {
+      const taskId = typeof body.taskId === "string"
+        ? body.taskId.trim()
+        : "";
+
+      if (!taskId) {
+        return res.json({
+          success: false,
+          message: "معرف المهمة مطلوب"
+        }, 400);
+      }
+
+      const task = await tables.getRow({
+        databaseId: DATABASE_ID,
+        tableId: TASKS_ID,
+        rowId: taskId
+      });
+
+      // التأكد أن المستخدم مدير الغرفة
+      const memberships = await tables.listRows({
+        databaseId: DATABASE_ID,
+        tableId: MEMBERS_ID,
+        queries: [
+          Query.equal("workspaceId", task.workspaceId),
+          Query.equal("userId", user.$id),
+          Query.limit(1)
+        ]
+      });
+
+      if (memberships.rows[0]?.role !== "admin") {
+        return res.json({
+          success: false,
+          message: "مدير الغرفة فقط يستطيع حذف المهام"
+        }, 403);
+      }
+
+      // حذف تعيينات المهمة أولًا
+      const assignments = await tables.listRows({
+        databaseId: DATABASE_ID,
+        tableId: TASK_ASSIGNEES_ID,
+        queries: [
+          Query.equal("taskId", taskId),
+          Query.limit(100)
+        ]
+      });
+
+      for (const assignment of assignments.rows) {
+        await tables.deleteRow({
+          databaseId: DATABASE_ID,
+          tableId: TASK_ASSIGNEES_ID,
+          rowId: assignment.$id
+        });
+      }
+
+      // حذف المهمة من قاعدة البيانات
+      await tables.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId: TASKS_ID,
+        rowId: taskId
+      });
+
+      return res.json({
+        success: true,
+        message: "تم حذف المهمة بنجاح",
+        taskId: taskId
+      });
+    }
     if (body?.action === "updateTask") {
       const taskId = typeof body.taskId === "string"
         ? body.taskId.trim()
