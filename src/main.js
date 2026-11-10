@@ -233,6 +233,7 @@ if (body?.action === "listWorkspaces") {
     spaceId: task.workspaceId,
     title: task.title,
     details: task.description || "",
+    reward: task.reward || "",
     dueAt: task.dueAt || null,
     status: task.status,
     createdBy: task.createdBy,
@@ -469,6 +470,13 @@ if (body?.action === "listWorkspaces") {
   const description = typeof body.description === "string"
     ? body.description.trim()
     : "";
+  const reward = typeof body.reward === "string" ? body.reward.trim() : "";
+ if (!reward || reward.length > 255) {
+  return res.json({
+    success: false,
+    message: "يجب كتابة مكافأة المهمة (255 حرفًا كحد أقصى)"
+  }, 400);
+}         
 const dueAtValue = typeof body.dueAt === "string"
   ? body.dueAt.trim()
   : "";
@@ -547,6 +555,7 @@ if (dueAt && Number.isNaN(dueAt.getTime())) {
       workspaceId,
       title,
       description,
+      reward,
       status: "todo",
       createdBy: user.$id,
      createdAt: new Date().toISOString(),
@@ -602,6 +611,7 @@ if (dueAt && Number.isNaN(dueAt.getTime())) {
       spaceId: workspaceId,
       title,
       details: description,
+      reward,
       status: "todo",
       assignees,
       dueAt: dueAt ? dueAt.toISOString() : null,
