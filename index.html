@@ -890,8 +890,29 @@ function openSpace(id) {
       throw new Error(result.message || "تعذر استرجاع المهام");
     }
 
-    result.tasks.forEach(function (remoteTask) {
+ 
+    // تتبع المهام المحفوظة في Appwrite لكل غرفة
+    if (!db.syncedTaskIds) {
+      db.syncedTaskIds = {};
+    }
 
+    var previousIds = db.syncedTaskIds[id] || [];
+
+    var currentIds = result.tasks.map(function (task) {
+      return task.id;
+    });
+
+    // إزالة المهام السحابية المحذوفة فقط
+    if (result.tasks.length < 100) {
+      db.tasks = db.tasks.filter(function (task) {
+        if (task.spaceId !== id) return true;
+        if (!previousIds.includes(task.id)) return true;
+        return currentIds.includes(task.id);
+      });
+    }
+
+    db.syncedTaskIds[id] = currentIds;
+        result.tasks.forEach(function (remoteTask) {
       var existing = db.tasks.find(function (task) {
         return task.id === remoteTask.id;
       });
@@ -1042,11 +1063,53 @@ $('tasks-list').addEventListener('click', async function (e) {
       return;
     }
     var del = e.target.closest('[data-del]');
-    if (del) {
+        if (del) {
       var m = myMembership(state.spaceId);
       if (!m || m.role !== 'admin') return;
-      db.tasks = db.tasks.filter(function (x) { return x.id !== del.dataset.del; });
-      save(db); renderTasks(); renderSpaces(); toast('تم حذف المهمة');
+      if (del.disabled) return;
+
+      var taskId = del.dataset.del;
+
+      if (!confirm('هل تريد حذف هذه المهمة نهائيًا؟')) return;
+
+      del.disabled = true;
+
+      try {
+        var functions = new Appwrite.Functions(window.fariqna.client);
+
+        var execution = await functions.createExecution({
+          functionId: "6aef48cf0019c49d0ddd",
+          body: JSON.stringify({
+            action: "deleteTask",
+            taskId: taskId
+          }),
+          async: false,
+          headers: {
+            "content-type": "application/json"
+          }
+        });
+
+        var result = JSON.parse(execution.responseBody || "{}");
+
+        if (!result.success) {
+          throw new Error(result.message || "تعذر حذف المهمة");
+        }
+
+        db.tasks = db.tasks.filter(function (task) {
+          return task.id !== taskId;
+        });
+
+        save(db);
+        renderTasks();
+        renderSpaces();
+        renderMembers();
+
+        toast('تم حذف المهمة بنجاح');
+
+      } catch (err) {
+        toast('تعذر حذف المهمة: ' + err.message);
+        del.disabled = false;
+      }
     }
   });
 
