@@ -440,6 +440,9 @@ textarea { resize: vertical; }
             <label>التفاصيل
               <textarea name="details" rows="3" maxlength="1000"></textarea>
             </label>
+           <label>📅 موعد التسليم (اختياري)
+  <input type="datetime-local" name="dueAt">
+</label>
             <fieldset class="assignees">
               <legend>تعيين إلى</legend>
               <div id="assignee-options"></div>
@@ -988,7 +991,7 @@ function openSpace(id) {
       if (existing) {
         existing.status = remoteTask.status;
         existing.assignees = remoteTask.assignees;
-
+existing.dueAt = remoteTask.dueAt || null;
         if (remoteTask.status !== 'done') {
           existing.completedBy = null;
         }
@@ -1071,11 +1074,30 @@ function openSpace(id) {
           (mine ? '' : ' disabled') + '>' + STATUS[k] + '</button>';
       }).join('');
       var done = t.completedBy ? '<span>أنجزها: ' + esc(t.completedBy) + '</span>' : '';
+     var dueInfo = '';
+
+if (t.dueAt) {
+  var dueDate = new Date(t.dueAt);
+
+  if (!Number.isNaN(dueDate.getTime())) {
+    var dueText = dueDate.toLocaleString('ar-SA-u-ca-gregory', {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    });
+
+    var overdue = t.status !== 'done' && dueDate.getTime() < Date.now();
+
+    dueInfo = '<span>' +
+      (overdue ? '🔴 متأخرة — ' : '📅 موعد التسليم: ') +
+      esc(dueText) +
+      '</span>';
+  }
+}
       var el = document.createElement('article');
       el.className = 'task ' + t.status;
       el.innerHTML = '<h4 class="task-title">' + esc(t.title) + '</h4>' +
         (t.details ? '<p class="task-details">' + esc(t.details) + '</p>' : '') +
-        '<div class="task-meta"><span>المعيّنون: ' + esc(names) + '</span>' + done + '</div>' +
+        '<div class="task-meta"><span>المعيّنون: ' + esc(names) + '</span>' + done + dueInfo + '</div>' +
         '<div class="task-row"><div class="status-group">' + statusBtns + '</div>' +
         (isAdmin ? '<button class="icon-btn" data-del="' + t.id + '">حذف</button>' : '') + '</div>';
       box.appendChild(el);
@@ -1196,7 +1218,19 @@ $('task-form').addEventListener('submit', async function (e) {
 
   var title = String(fd.get('title') || '').trim();
   var description = String(fd.get('details') || '').trim();
+var dueAtInput = String(fd.get('dueAt') || '').trim();
+ var dueAt = '';
 
+if (dueAtInput) {
+  var dueDate = new Date(dueAtInput);
+
+  if (Number.isNaN(dueDate.getTime())) {
+    toast('موعد التسليم غير صحيح');
+    return;
+  }
+
+  dueAt = dueDate.toISOString();
+}
   var assignees = Array.from(
     form.querySelectorAll('input[name="assignee"]:checked'),
     function (input) {
@@ -1225,7 +1259,8 @@ $('task-form').addEventListener('submit', async function (e) {
         workspaceId: workspaceId,
         title: title,
         description: description,
-        assignees: assignees
+        assignees: assignees,
+dueAt: dueAt
       }),
       async: false,
       headers: {
