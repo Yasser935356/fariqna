@@ -961,19 +961,89 @@ function openSpace(id) {
     }
   });
 
-  $('task-form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var m = myMembership(state.spaceId);
-    if (!m || m.role !== 'admin') { toast('المدير فقط يستطيع إنشاء المهام'); return; }
-    var fd = new FormData(this);
-    var assignees = Array.prototype.map.call(this.querySelectorAll('input[name="assignee"]:checked'), function (c) { return c.value; });
-    db.tasks.push({
-      id: uid(), spaceId: state.spaceId, title: String(fd.get('title')).trim(),
-      details: String(fd.get('details') || '').trim(), assignees: assignees,
-      status: 'todo', completedBy: null
+$('task-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+
+  var m = myMembership(state.spaceId);
+
+  if (!m || m.role !== 'admin') {
+    toast('المدير فقط يستطيع إنشاء المهام');
+    return;
+  }
+
+  var form = this;
+  var fd = new FormData(form);
+
+  var title = String(fd.get('title') || '').trim();
+  var description = String(fd.get('details') || '').trim();
+
+  var assignees = Array.from(
+    form.querySelectorAll('input[name="assignee"]:checked'),
+    function (input) {
+      return input.value;
+    }
+  );
+
+  if (!title || title.length > 120 || description.length > 1000) {
+    toast('تحقق من عنوان المهمة وتفاصيلها');
+    return;
+  }
+
+  var workspaceId = state.spaceId;
+  var btn = form.querySelector('[type="submit"]');
+
+  if (btn.disabled) return;
+  btn.disabled = true;
+
+  try {
+    var functions = new Appwrite.Functions(window.fariqna.client);
+
+    var execution = await functions.createExecution({
+      functionId: "6aef48cf0019c49d0ddd",
+      body: JSON.stringify({
+        action: "createTask",
+        workspaceId: workspaceId,
+        title: title,
+        description: description,
+        assignees: assignees
+      }),
+      async: false,
+      headers: {
+        "content-type": "application/json"
+      }
     });
-    save(db); this.reset(); renderTasks(); renderSpaces(); toast('تمت إضافة المهمة');
-  });
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success || !result.task) {
+      throw new Error(result.message || "تعذر إنشاء المهمة");
+    }
+
+    var existing = db.tasks.find(function (task) {
+      return task.id === result.task.id;
+    });
+
+    if (!existing) {
+      db.tasks.push(result.task);
+    }
+
+    save(db);
+    form.reset();
+
+    if (state.spaceId === workspaceId) {
+      renderTasks();
+      renderSpaces();
+    }
+
+    toast('تم إنشاء المهمة وحفظها بنجاح');
+
+  } catch (err) {
+    toast('تعذر إنشاء المهمة: ' + err.message);
+
+  } finally {
+    btn.disabled = false;
+  }
+});
 
   function renderMembers() {
     var m = myMembership(state.spaceId);
