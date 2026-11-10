@@ -871,6 +871,52 @@ function openSpace(id) {
   }).catch(function (err) {
     toast("تعذر استرجاع الأعضاء: " + err.message);
   });
+    // استرجاع مهام الغرفة من Appwrite
+  functions.createExecution({
+    functionId: "6aef48cf0019c49d0ddd",
+    body: JSON.stringify({
+      action: "listTasks",
+      workspaceId: id
+    }),
+    async: false,
+    headers: {
+      "content-type": "application/json"
+    }
+  }).then(function (execution) {
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success || !Array.isArray(result.tasks)) {
+      throw new Error(result.message || "تعذر استرجاع المهام");
+    }
+
+    result.tasks.forEach(function (remoteTask) {
+
+      var existing = db.tasks.find(function (task) {
+        return task.id === remoteTask.id;
+      });
+
+      // إضافة المهام غير الموجودة فقط، لحماية التعديلات المحلية
+      if (!existing) {
+        db.tasks.push(
+          Object.assign({ completedBy: null }, remoteTask)
+        );
+      }
+
+    });
+
+    save(db);
+
+    if (state.spaceId === id && state.view === "space") {
+      renderTasks();
+      renderMembers();
+    }
+
+    renderSpaces();
+
+  }).catch(function (err) {
+    toast("تعذر استرجاع المهام: " + err.message);
+  });
 }
 
   $('back-btn').addEventListener('click', function () { renderSpaces(); show('spaces'); });
