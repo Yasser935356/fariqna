@@ -1,3 +1,16 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
 import { Client, Account, TablesDB, ID, Query, Users } from "node-appwrite";
 import { randomInt } from "node:crypto";
 
@@ -6,6 +19,7 @@ const WORKSPACES_ID = "6aef1fdf0036603f6755";
 const MEMBERS_ID = "6aef25b4002952a7a5ff";
 const TASKS_ID = "6aef29b0001e100d5905";
 const TASK_ASSIGNEES_ID = "6aef2c360036aa8a7879";
+const MESSAGES_ID = "6af36073003490c9eff4";
 function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let result = "";
@@ -247,6 +261,224 @@ if (body?.action === "listWorkspaces") {
     tasks
   });
 }
+    // ---------- عرض رسائل الغرفة أو المهمة ----------
+    if (body?.action === "listMessages") {
+      const workspaceId = typeof body.workspaceId === "string"
+        ? body.workspaceId.trim()
+        : "";
+      const taskId = typeof body.taskId === "string"
+        ? body.taskId.trim()
+        : "";
+
+      if (!workspaceId) {
+        return res.json({
+          success: false,
+          message: "معرّف الغرفة مطلوب"
+        }, 400);
+      }
+
+      // لا يمكن قراءة المحادثة إلا لعضو في الغرفة.
+      const memberships = await tables.listRows({
+        databaseId: DATABASE_ID,
+        tableId: MEMBERS_ID,
+        queries: [
+          Query.equal("workspaceId", workspaceId),
+          Query.equal("userId", user.$id),
+          Query.limit(1)
+        ]
+      });
+
+      if (memberships.rows.length === 0) {
+        return res.json({
+          success: false,
+          message: "ليس لديك صلاحية لعرض رسائل هذه الغرفة"
+        }, 403);
+      }
+
+      // محادثة المهمة: المدير والمكلفون بهذه المهمة فقط.
+      if (taskId) {
+        let task;
+        try {
+          task = await tables.getRow({
+            databaseId: DATABASE_ID,
+            tableId: TASKS_ID,
+            rowId: taskId
+          });
+        } catch (_) {
+          return res.json({
+            success: false,
+            message: "المهمة غير موجودة"
+          }, 404);
+        }
+
+        if (task.workspaceId !== workspaceId) {
+          return res.json({
+            success: false,
+            message: "هذه المهمة لا تنتمي إلى الغرفة"
+          }, 403);
+        }
+
+        if (memberships.rows[0].role !== "admin") {
+          const assignments = await tables.listRows({
+            databaseId: DATABASE_ID,
+            tableId: TASK_ASSIGNEES_ID,
+            queries: [
+              Query.equal("taskId", taskId),
+              Query.equal("userId", user.$id),
+              Query.limit(1)
+            ]
+          });
+
+          if (assignments.rows.length === 0) {
+            return res.json({
+              success: false,
+              message: "محادثة المهمة مخصصة للمكلفين بها"
+            }, 403);
+          }
+        }
+      }
+
+      // فصل الرسائل العامة عن رسائل المهمة.
+      const messageQueries = [
+        Query.equal("workspaceId", workspaceId),
+        taskId ? Query.equal("taskId", taskId) : Query.isNull("taskId"),
+        Query.orderDesc("$createdAt"),
+        Query.limit(100)
+      ];
+
+      const messageRows = await tables.listRows({
+        databaseId: DATABASE_ID,
+        tableId: MESSAGES_ID,
+        queries: messageQueries
+      });
+
+      // آخر 100 رسالة، مرتبة من الأقدم إلى الأحدث للعرض في الواجهة.
+      const messages = messageRows.rows.map(msg => ({
+        id: msg.$id,
+        workspaceId: msg.workspaceId,
+        taskId: msg.taskId || null,
+        senderId: msg.senderId,
+        content: msg.content || "",
+        messageType: msg.messageType,
+        attachmentId: msg.attachmentId || null,
+        createdAt: msg.$createdAt
+      })).reverse();
+
+      return res.json({
+        success: true,
+        messages
+      });
+    }
+
+    // ---------- إرسال رسالة نصية ----------
+    // سنضيف رفع الصور وملفات PDF في خطوة لاحقة عبر Appwrite Storage.
+    if (body?.action === "sendMessage") {
+      const workspaceId = typeof body.workspaceId === "string"
+        ? body.workspaceId.trim()
+        : "";
+      const taskId = typeof body.taskId === "string"
+        ? body.taskId.trim()
+        : "";
+      const content = typeof body.content === "string"
+        ? body.content.trim()
+        : "";
+      const messageType = body.messageType || "text";
+
+      if (!workspaceId || !content || content.length > 2000 || messageType !== "text") {
+        return res.json({
+          success: false,
+          message: "تحقق من نص الرسالة (2000 حرف كحد أقصى)"
+        }, 400);
+      }
+
+      const memberships = await tables.listRows({
+        databaseId: DATABASE_ID,
+        tableId: MEMBERS_ID,
+        queries: [
+          Query.equal("workspaceId", workspaceId),
+          Query.equal("userId", user.$id),
+          Query.limit(1)
+        ]
+      });
+
+      if (memberships.rows.length === 0) {
+        return res.json({
+          success: false,
+          message: "ليس لديك صلاحية لإرسال رسائل لهذه الغرفة"
+        }, 403);
+      }
+
+      if (taskId) {
+        let task;
+        try {
+          task = await tables.getRow({
+            databaseId: DATABASE_ID,
+            tableId: TASKS_ID,
+            rowId: taskId
+          });
+        } catch (_) {
+          return res.json({
+            success: false,
+            message: "المهمة غير موجودة"
+          }, 404);
+        }
+
+        if (task.workspaceId !== workspaceId) {
+          return res.json({
+            success: false,
+            message: "هذه المهمة لا تنتمي إلى الغرفة"
+          }, 403);
+        }
+
+        if (memberships.rows[0].role !== "admin") {
+          const assignments = await tables.listRows({
+            databaseId: DATABASE_ID,
+            tableId: TASK_ASSIGNEES_ID,
+            queries: [
+              Query.equal("taskId", taskId),
+              Query.equal("userId", user.$id),
+              Query.limit(1)
+            ]
+          });
+
+          if (assignments.rows.length === 0) {
+            return res.json({
+              success: false,
+              message: "محادثة المهمة مخصصة للمكلفين بها"
+            }, 403);
+          }
+        }
+      }
+
+      const created = await tables.createRow({
+        databaseId: DATABASE_ID,
+        tableId: MESSAGES_ID,
+        rowId: ID.unique(),
+        data: {
+          workspaceId,
+          senderId: user.$id,
+          content,
+          messageType: "text",
+          ...(taskId ? { taskId } : {})
+        },
+        permissions: []
+      });
+
+      return res.json({
+        success: true,
+        message: "تم إرسال الرسالة بنجاح",
+        messageData: {
+          id: created.$id,
+          workspaceId,
+          taskId: taskId || null,
+          senderId: user.$id,
+          content,
+          messageType: "text",
+          attachmentId: null,
+          createdAt: created.$createdAt
+        }
+      });
+    }
     if (body?.action === "listMembers") {
   const workspaceId = typeof body.workspaceId === "string"
     ? body.workspaceId.trim()
@@ -707,3 +939,7 @@ if (dueAt && Number.isNaN(dueAt.getTime())) {
     }, 500);
   }
 };
+
+
+
+
