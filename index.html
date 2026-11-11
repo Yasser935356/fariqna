@@ -1429,7 +1429,7 @@ async function fetchChatAttachment(messageId, workspaceId, taskId) {
 
   return result;
 }
-async function uploadChatAttachment(file, workspaceId, taskId) {
+async function uploadChatAttachment(file, workspaceId, taskId, caption) {
   var allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
   var ext = file.name.split('.').pop().toLowerCase();
 
@@ -1452,7 +1452,8 @@ async function uploadChatAttachment(file, workspaceId, taskId) {
       workspaceId: workspaceId,
       taskId: taskId || "",
       fileName: file.name,
-      fileBase64: fileBase64
+      fileBase64: fileBase64,
+caption: caption || ""
     }),
     async: false,
     headers: {
@@ -1488,9 +1489,9 @@ if (!message && !attachment) {
   try {
    // رفع المرفق إذا اختار المستخدم ملفًا
 if (attachment) {
-  await uploadChatAttachment(attachment, state.spaceId, null);
+await uploadChatAttachment(attachment, state.spaceId, null, message);
 }
-   if (message) {
+  if (message && !attachment) {
     var functions = new Appwrite.Functions(window.fariqna.client);
 
     var execution = await functions.createExecution({
@@ -1603,6 +1604,37 @@ async function loadRoomMessages() {
   fileBtn.dataset.taskId = '';
 
   bubble.appendChild(fileBtn);
+      if (msg.caption) {
+  var caption = document.createElement('div');
+  caption.textContent = msg.caption;
+  caption.style.whiteSpace = 'pre-wrap';
+  caption.style.marginTop = '8px';
+  bubble.appendChild(caption);
+}
+}
+     // زر عرض مرفقات المهمة
+if (msg.attachmentId) {
+  var fileBtn = document.createElement('button');
+  fileBtn.type = 'button';
+  fileBtn.className = 'btn ghost small';
+
+  fileBtn.textContent = msg.messageType === 'pdf'
+    ? '📄 فتح ملف PDF'
+    : '🖼️ عرض الصورة';
+
+  fileBtn.dataset.attachmentMessage = msg.id;
+  fileBtn.dataset.workspaceId = workspaceId;
+  fileBtn.dataset.taskId = taskId;
+
+  bubble.appendChild(fileBtn);
+
+  if (msg.caption) {
+    var caption = document.createElement('div');
+    caption.textContent = msg.caption;
+    caption.style.whiteSpace = 'pre-wrap';
+    caption.style.marginTop = '8px';
+    bubble.appendChild(caption);
+  }
 }
       bubble.appendChild(time);
 
@@ -1765,9 +1797,9 @@ if (!message && !attachment) {
   try {
    // رفع المرفق في محادثة المهمة
 if (attachment) {
-  await uploadChatAttachment(attachment, workspaceId, taskId);
+await uploadChatAttachment(attachment, workspaceId, taskId, message);
 }
-   if (message) {
+   if (message && !attachment) {
     var functions = new Appwrite.Functions(window.fariqna.client);
 
     var execution = await functions.createExecution({
