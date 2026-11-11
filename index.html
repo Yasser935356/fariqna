@@ -487,7 +487,30 @@ textarea { resize: vertical; }
     <form id="modal-form" class="form"></form>
   </div>
 </div>
+<!-- 💬 نافذة محادثة المهمة -->
+<div id="task-chat-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="task-chat-title">
+  <div class="modal-card" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
 
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+      <h3 id="task-chat-title">💬 محادثة المهمة</h3>
+      <button type="button" id="task-chat-close" class="btn ghost small">إغلاق ✕</button>
+    </div>
+
+    <div id="task-chat-messages" class="chat-messages">
+      <p class="muted">لا توجد رسائل حتى الآن.</p>
+    </div>
+
+    <form id="task-chat-form" class="form">
+      <label>اكتب رسالتك
+        <textarea name="message" rows="2" maxlength="2000"
+                  placeholder="اكتب رسالة عن هذه المهمة..." required></textarea>
+      </label>
+
+      <button type="submit" class="btn primary">💬 إرسال</button>
+    </form>
+
+  </div>
+</div>
 <div class="toast" id="toast" role="status"></div>
 
 <script>/* inlined app.js */
@@ -1121,6 +1144,16 @@ if (t.dueAt) {
       '<div class="task-meta"><span>المعيّنون: ' + esc(names) + '</span>' + done + dueInfo + (t.reward ? '<span>🎁 مكافأة المهمة: ' + esc(t.reward) + '</span>' : '') + '</div>' +
         '<div class="task-row"><div class="status-group">' + statusBtns + '</div>' +
         (isAdmin ? '<button class="icon-btn" data-del="' + t.id + '">حذف</button>' : '') + '</div>';
+     // زر محادثة المهمة
+if (mine) {
+  var chatBtn = document.createElement('button');
+  chatBtn.type = 'button';
+  chatBtn.className = 'btn ghost small';
+  chatBtn.textContent = '💬 محادثة المهمة';
+  chatBtn.dataset.taskChat = t.id;
+  chatBtn.style.marginTop = '10px';
+  el.appendChild(chatBtn);
+}
       box.appendChild(el);
     });
     $('tasks-empty').classList.toggle('hidden', list.length > 0);
@@ -1465,6 +1498,189 @@ async function loadRoomMessages() {
     box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
   }
 }
+ // ---------- فتح وإغلاق محادثة المهمة ----------
+$('tasks-list').addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-task-chat]');
+  if (!btn) return;
+
+  var task = db.tasks.find(function (t) {
+    return t.id === btn.dataset.taskChat &&
+           t.spaceId === state.spaceId;
+  });
+
+  var user = me();
+  var membership = myMembership(state.spaceId);
+  var isAdmin = membership && membership.role === 'admin';
+
+  if (!task || !user ||
+      (!isAdmin && !(task.assignees || []).includes(user.id))) {
+    toast('ليس لديك صلاحية لفتح محادثة هذه المهمة');
+    return;
+  }
+
+  state.taskChatId = task.id;
+
+  $('task-chat-title').textContent =
+    '💬 محادثة المهمة: ' + task.title;
+
+  $('task-chat-messages').textContent =
+    'جارٍ تجهيز المحادثة...';
+
+  $('task-chat-form').reset();
+  $('task-chat-modal').classList.remove('hidden');
+ loadTaskMessages();
+});
+
+// زر إغلاق المحادثة
+$('task-chat-close').addEventListener('click', function () {
+  $('task-chat-modal').classList.add('hidden');
+  state.taskChatId = null;
+});
+ // ---------- تحميل رسائل محادثة المهمة ----------
+async function loadTaskMessages() {
+  var taskId = state.taskChatId;
+  var workspaceId = state.spaceId;
+  var box = $('task-chat-messages');
+
+  if (!taskId || !workspaceId || !box) return;
+
+  box.textContent = 'جارٍ تحميل الرسائل...';
+
+  try {
+    var functions = new Appwrite.Functions(window.fariqna.client);
+
+    var execution = await functions.createExecution({
+      functionId: "6aef48cf0019c49d0ddd",
+      body: JSON.stringify({
+        action: "listMessages",
+        workspaceId: workspaceId,
+        taskId: taskId
+      }),
+      async: false,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success || !Array.isArray(result.messages)) {
+      throw new Error(result.message || "تعذر تحميل الرسائل");
+    }
+
+    if (state.taskChatId !== taskId ||
+        state.spaceId !== workspaceId) return;
+
+    box.innerHTML = '';
+
+    if (result.messages.length === 0) {
+      box.textContent = 'لا توجد رسائل لهذه المهمة حتى الآن.';
+      return;
+    }
+
+    result.messages.forEach(function (msg) {
+      var bubble = document.createElement('div');
+      bubble.className = 'chat-bubble';
+
+      if (me() && msg.senderId === me().id) {
+        bubble.classList.add('mine');
+      }
+
+      var sender = db.users.find(function (u) {
+        return u.id === msg.senderId;
+      });
+
+      var name = document.createElement('div');
+      name.className = 'chat-name';
+      name.textContent = sender ? sender.name : 'عضو';
+
+      var content = document.createElement('div');
+      content.textContent = msg.content || '';
+      content.style.whiteSpace = 'pre-wrap';
+
+      var time = document.createElement('small');
+      time.className = 'muted';
+      time.textContent = new Date(msg.createdAt)
+        .toLocaleString('ar-SA');
+
+      bubble.appendChild(name);
+      bubble.appendChild(content);
+      bubble.appendChild(time);
+
+      box.appendChild(bubble);
+    });
+
+    box.scrollTop = box.scrollHeight;
+
+  } catch (err) {
+    if (state.taskChatId === taskId) {
+      box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
+    }
+  }
+}
+ // ---------- إرسال رسائل محادثة المهمة ----------
+$('task-chat-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+
+  var form = this;
+  var taskId = state.taskChatId;
+  var workspaceId = state.spaceId;
+  var message = String(
+    new FormData(form).get('message') || ''
+  ).trim();
+
+  if (!taskId || !workspaceId) {
+    toast('افتح محادثة المهمة أولًا');
+    return;
+  }
+
+  if (!message) {
+    toast('اكتب رسالة أولًا');
+    return;
+  }
+
+  var btn = form.querySelector('button[type="submit"]');
+
+  if (btn.disabled) return;
+  btn.disabled = true;
+
+  try {
+    var functions = new Appwrite.Functions(window.fariqna.client);
+
+    var execution = await functions.createExecution({
+      functionId: "6aef48cf0019c49d0ddd",
+      body: JSON.stringify({
+        action: "sendMessage",
+        workspaceId: workspaceId,
+        taskId: taskId,
+        content: message,
+        messageType: "text"
+      }),
+      async: false,
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+
+    var result = JSON.parse(execution.responseBody || "{}");
+
+    if (!result.success) {
+      throw new Error(result.message || "تعذر إرسال الرسالة");
+    }
+
+    if (state.taskChatId === taskId &&
+        state.spaceId === workspaceId) {
+      form.reset();
+      await loadTaskMessages();
+      toast('تم إرسال الرسالة بنجاح');
+    }
+
+  } catch (err) {
+    toast('تعذر إرسال الرسالة: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
   // ---------- بدء التطبيق ----------
  account.get().then(function (appUser) {
   saveUser(appUser);
