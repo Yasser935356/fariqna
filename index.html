@@ -440,7 +440,13 @@ textarea { resize: vertical; }
       <textarea name="message" rows="2" maxlength="2000"
                 placeholder="اكتب رسالة لأعضاء الغرفة..." required></textarea>
     </label>
-
+<label>📎 إرفاق صورة أو ملف PDF
+  <input
+    type="file"
+    name="attachment"
+    accept=".jpg,.jpeg,.png,.webp,.gif,.pdf"
+  >
+</label>
     <button type="submit" class="btn primary">💬 إرسال</button>
   </form>
 </section>
@@ -505,7 +511,13 @@ textarea { resize: vertical; }
         <textarea name="message" rows="2" maxlength="2000"
                   placeholder="اكتب رسالة عن هذه المهمة..." required></textarea>
       </label>
-
+<label>📎 إرفاق صورة أو ملف PDF
+  <input
+    type="file"
+    name="attachment"
+    accept=".jpg,.jpeg,.png,.webp,.gif,.pdf"
+  >
+</label>
       <button type="submit" class="btn primary">💬 إرسال</button>
     </form>
 
