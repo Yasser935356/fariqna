@@ -11,7 +11,8 @@
 
 
 
-import { Client, Account, TablesDB, ID, Query, Users } from "node-appwrite";
+import { Client, Account, TablesDB, ID, Query, Users, Storage, Permission, Role } from "node-appwrite";
+import { InputFile } from "node-appwrite/file";
 import { randomInt } from "node:crypto";
 
 const DATABASE_ID = "6aef1e2d000fb1f56fdd";
@@ -20,6 +21,7 @@ const MEMBERS_ID = "6aef25b4002952a7a5ff";
 const TASKS_ID = "6aef29b0001e100d5905";
 const TASK_ASSIGNEES_ID = "6aef2c360036aa8a7879";
 const MESSAGES_ID = "6af36073003490c9eff4";
+const ATTACHMENTS_BUCKET_ID = "6af40a8700134c679043";
 function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let result = "";
@@ -30,7 +32,88 @@ function generateCode() {
 
   return result;
 }
+// ---------- التحقق من صلاحية الوصول للمحادثة ----------
+async function canAccessChat(tables, workspaceId, taskId, userId) {
+  const memberships = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: MEMBERS_ID,
+    queries: [
+      Query.equal("workspaceId", workspaceId),
+      Query.equal("userId", userId),
+      Query.limit(1)
+    ]
+  });
 
+  if (memberships.rows.length === 0) return false;
+
+  // المحادثة العامة متاحة لجميع أعضاء الغرفة
+  if (!taskId) return true;
+
+  // التأكد من أن المهمة تتبع الغرفة نفسها
+  let task;
+
+  try {
+    task = await tables.getRow({
+      databaseId: DATABASE_ID,
+      tableId: TASKS_ID,
+      rowId: taskId
+    });
+  } catch (_) {
+    return false;
+  }
+
+  if (task.workspaceId !== workspaceId) return false;
+
+  // المدير يستطيع الوصول لجميع محادثات المهام
+  if (memberships.rows[0].role === "admin") return true;
+
+  // العضو يستطيع الوصول للمهمة المكلف بها فقط
+  const assignments = await tables.listRows({
+    databaseId: DATABASE_ID,
+    tableId: TASK_ASSIGNEES_ID,
+    queries: [
+      Query.equal("taskId", taskId),
+      Query.equal("userId", userId),
+      Query.limit(1)
+    ]
+  });
+
+  return assignments.rows.length > 0;
+}
+// ---------- التحقق من نوع المرفق ----------
+function getAttachmentType(buffer, filename) {
+  const ext = String(filename || "").split(".").pop().toLowerCase();
+  const hex = buffer.subarray(0, 12).toString("hex");
+  const header = buffer.subarray(0, 12).toString("ascii");
+
+  if (
+    ext === "pdf" &&
+    header.startsWith("%PDF-")
+  ) return "pdf";
+
+  if (
+    ["jpg", "jpeg"].includes(ext) &&
+    hex.startsWith("ffd8ff")
+  ) return "image";
+
+  if (
+    ext === "png" &&
+    hex.startsWith("89504e470d0a1a0a")
+  ) return "image";
+
+  if (
+    ext === "gif" &&
+    (header.startsWith("GIF87a") || header.startsWith("GIF89a"))
+  ) return "image";
+
+  if (
+    ext === "webp" &&
+    header.startsWith("RIFF") &&
+    header.slice(8, 12) === "WEBP"
+  ) return "image";
+
+  return null;
+}
 export default async ({ req, res, error }) => {
   try {
     if (req.method === "GET") {
@@ -78,7 +161,7 @@ export default async ({ req, res, error }) => {
       .setKey(serverKey);
 
     const tables = new TablesDB(serverClient);
-
+const storage = new Storage(serverClient);
     const body = req.bodyJson;
 if (body?.action === "listWorkspaces") {
   const memberships = await tables.listRows({
@@ -262,6 +345,173 @@ if (body?.action === "listWorkspaces") {
   });
 }
     // ---------- عرض رسائل الغرفة أو المهمة ----------
+    // ---------- رفع مرفق وإرساله في المحادثة ----------
+if (body?.action === "uploadAttachment") {
+  const workspaceId = String(body.workspaceId || "").trim();
+  const taskId = String(body.taskId || "").trim();
+
+  const filename = String(body.fileName || "")
+    .replace(/[\\/\x00-\x1f\x7f]/g, "_")
+    .trim()
+    .slice(0, 120);
+
+  const base64 = String(body.fileBase64 || "");
+
+  // الحد المبدئي: 2 ميجابايت للملف الواحد
+  if (
+    !workspaceId ||
+    !filename ||
+    !base64 ||
+    base64.length > 2800000
+  ) {
+    return res.json({
+      success: false,
+      message: "بيانات الملف غير صحيحة أو حجمه كبير"
+    }, 400);
+  }
+
+  // التأكد من صلاحية المستخدم قبل رفع الملف
+  const allowed = await canAccessChat(
+    tables, workspaceId, taskId, user.$id
+  );
+
+  if (!allowed) {
+    return res.json({
+      success: false,
+      message: "ليس لديك صلاحية لإرسال مرفقات هنا"
+    }, 403);
+  }
+
+  const buffer = Buffer.from(base64, "base64");
+
+  if (!buffer.length || buffer.length > 2 * 1024 * 1024) {
+    return res.json({
+      success: false,
+      message: "الحد الأقصى للملف 2 ميجابايت"
+    }, 400);
+  }
+
+  const fileType = getAttachmentType(buffer, filename);
+
+  if (!fileType) {
+    return res.json({
+      success: false,
+      message: "يُسمح بالصور وملفات PDF فقط"
+    }, 400);
+  }
+
+  // حفظ الملف دون صلاحيات قراءة عامة
+  const uploaded = await storage.createFile({
+    bucketId: ATTACHMENTS_BUCKET_ID,
+    fileId: ID.unique(),
+    file: InputFile.fromBuffer(buffer, filename),
+    permissions: []
+  });
+
+  let created;
+
+  try {
+    created = await tables.createRow({
+      databaseId: DATABASE_ID,
+      tableId: MESSAGES_ID,
+      rowId: ID.unique(),
+      data: {
+        workspaceId,
+        senderId: user.$id,
+        content: filename,
+        messageType: fileType,
+        attachmentId: uploaded.$id,
+        ...(taskId ? { taskId } : {})
+      },
+      permissions: []
+    });
+  } catch (err) {
+    await storage.deleteFile({
+      bucketId: ATTACHMENTS_BUCKET_ID,
+      fileId: uploaded.$id
+    }).catch(() => {});
+    throw err;
+  }
+
+  return res.json({
+    success: true,
+    message: "تم إرسال المرفق بنجاح",
+    messageData: {
+      id: created.$id,
+      attachmentId: uploaded.$id,
+      messageType: fileType
+    }
+  });
+}
+    // ---------- عرض وتنزيل مرفقات المحادثة ----------
+if (body?.action === "getAttachment") {
+  const workspaceId = String(body.workspaceId || "").trim();
+  const taskId = String(body.taskId || "").trim();
+  const messageId = String(body.messageId || "").trim();
+
+  if (!workspaceId || !messageId) {
+    return res.json({
+      success: false,
+      message: "بيانات المرفق غير مكتملة"
+    }, 400);
+  }
+
+  // التحقق من صلاحية المستخدم
+  const allowed = await canAccessChat(
+    tables, workspaceId, taskId, user.$id
+  );
+
+  if (!allowed) {
+    return res.json({
+      success: false,
+      message: "ليس لديك صلاحية لعرض هذا المرفق"
+    }, 403);
+  }
+
+  // جلب الرسالة المرتبطة بالمرفق
+  let message;
+
+  try {
+    message = await tables.getRow({
+      databaseId: DATABASE_ID,
+      tableId: MESSAGES_ID,
+      rowId: messageId
+    });
+  } catch (_) {
+    return res.json({
+      success: false,
+      message: "المرفق غير موجود"
+    }, 404);
+  }
+
+  // التأكد أن المرفق ينتمي للمحادثة المطلوبة
+  if (
+    message.workspaceId !== workspaceId ||
+    (message.taskId || "") !== taskId ||
+    !message.attachmentId ||
+    !["image", "pdf"].includes(message.messageType)
+  ) {
+    return res.json({
+      success: false,
+      message: "ليس لديك صلاحية لعرض هذا المرفق"
+    }, 403);
+  }
+
+  // تنزيل الملف من التخزين الخاص
+  const fileBytes = await storage.getFileDownload({
+    bucketId: ATTACHMENTS_BUCKET_ID,
+    fileId: message.attachmentId
+  });
+
+  const fileBuffer = Buffer.from(fileBytes);
+
+  return res.json({
+    success: true,
+    fileName: message.content,
+    messageType: message.messageType,
+    fileBase64: fileBuffer.toString("base64")
+  });
+}
     if (body?.action === "listMessages") {
       const workspaceId = typeof body.workspaceId === "string"
         ? body.workspaceId.trim()
