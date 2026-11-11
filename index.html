@@ -1,3 +1,12 @@
+
+
+
+
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -1453,7 +1462,7 @@ async function uploadChatAttachment(file, workspaceId, taskId, caption) {
       taskId: taskId || "",
       fileName: file.name,
       fileBase64: fileBase64,
-caption: caption || ""
+      caption: caption || ""
     }),
     async: false,
     headers: {
@@ -1524,127 +1533,107 @@ await uploadChatAttachment(attachment, state.spaceId, null, message);
     btn.disabled = false;
   }
 });
- // ---------- عرض رسائل المحادثة العامة ----------
+ // ---------- عرض رسائل المحادثات بطريقة موحدة ----------
+function appendChatBubble(box, msg, workspaceId, taskId) {
+  var bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+
+  var currentUser = me();
+  if (currentUser && msg.senderId === currentUser.id) {
+    bubble.classList.add('mine');
+  }
+
+  var sender = db.users.find(function (u) {
+    return u.id === msg.senderId;
+  });
+
+  var name = document.createElement('div');
+  name.className = 'chat-name';
+  name.textContent = sender ? sender.name : 'عضو';
+  bubble.appendChild(name);
+
+  if (msg.attachmentId) {
+    // اسم الملف والتعليق وزر فتحه في فقاعة واحدة
+    var fileName = document.createElement('div');
+    fileName.textContent = '📎 ' + (msg.content || 'مرفق');
+    fileName.style.overflowWrap = 'anywhere';
+    bubble.appendChild(fileName);
+
+    var fileBtn = document.createElement('button');
+    fileBtn.type = 'button';
+    fileBtn.className = 'btn ghost small';
+    fileBtn.style.marginTop = '6px';
+    fileBtn.textContent = msg.messageType === 'pdf'
+      ? '📄 فتح ملف PDF'
+      : '🖼️ عرض الصورة';
+    fileBtn.dataset.attachmentMessage = msg.id;
+    fileBtn.dataset.workspaceId = workspaceId;
+    fileBtn.dataset.taskId = taskId || '';
+    bubble.appendChild(fileBtn);
+
+    if (msg.caption) {
+      var caption = document.createElement('div');
+      caption.textContent = msg.caption;
+      caption.style.whiteSpace = 'pre-wrap';
+      caption.style.marginTop = '8px';
+      bubble.appendChild(caption);
+    }
+  } else {
+    // الرسائل النصية العادية
+    var content = document.createElement('div');
+    content.textContent = msg.content || '';
+    content.style.whiteSpace = 'pre-wrap';
+    bubble.appendChild(content);
+  }
+
+  var time = document.createElement('small');
+  time.className = 'muted';
+  var date = new Date(msg.createdAt);
+  time.textContent = Number.isNaN(date.getTime())
+    ? '' : date.toLocaleString('ar-SA');
+  bubble.appendChild(time);
+  box.appendChild(bubble);
+}
+
+// ---------- تحميل رسائل المحادثة العامة ----------
 async function loadRoomMessages() {
   var workspaceId = state.spaceId;
   var box = $('room-messages');
-
   if (!workspaceId || !box) return;
-
   box.textContent = 'جارٍ تحميل الرسائل...';
 
   try {
     var functions = new Appwrite.Functions(window.fariqna.client);
-
     var execution = await functions.createExecution({
       functionId: "6aef48cf0019c49d0ddd",
       body: JSON.stringify({
-        action: "listMessages",
+        action: 'listMessages',
         workspaceId: workspaceId
       }),
       async: false,
-      headers: {
-        "content-type": "application/json"
-      }
+      headers: { 'content-type': 'application/json' }
     });
 
-    var result = JSON.parse(execution.responseBody || "{}");
-
+    var result = JSON.parse(execution.responseBody || '{}');
     if (!result.success || !Array.isArray(result.messages)) {
-      throw new Error(result.message || "تعذر تحميل الرسائل");
+      throw new Error(result.message || 'تعذر تحميل الرسائل');
     }
 
     if (state.spaceId !== workspaceId) return;
-
     box.innerHTML = '';
-
     if (result.messages.length === 0) {
       box.textContent = 'لا توجد رسائل حتى الآن.';
       return;
     }
 
     result.messages.forEach(function (msg) {
-      var bubble = document.createElement('div');
-      bubble.className = 'chat-bubble';
-
-      if (msg.senderId === me().id) {
-        bubble.classList.add('mine');
-      }
-
-      var sender = db.users.find(function (u) {
-        return u.id === msg.senderId;
-      });
-
-      var name = document.createElement('div');
-      name.className = 'chat-name';
-      name.textContent = sender ? sender.name : 'عضو';
-
-      var content = document.createElement('div');
-      content.textContent = msg.content || '';
-      content.style.whiteSpace = 'pre-wrap';
-
-      var time = document.createElement('small');
-      time.className = 'muted';
-      time.textContent = new Date(msg.createdAt)
-        .toLocaleString('ar-SA');
-
-      bubble.appendChild(name);
-      bubble.appendChild(content);
-     if (msg.attachmentId) {
-  var fileBtn = document.createElement('button');
-  fileBtn.type = 'button';
-  fileBtn.className = 'btn ghost small';
-
-  fileBtn.textContent = msg.messageType === 'pdf'
-    ? '📄 فتح ملف PDF'
-    : '🖼️ عرض الصورة';
-
-  fileBtn.dataset.attachmentMessage = msg.id;
-  fileBtn.dataset.workspaceId = workspaceId;
-  fileBtn.dataset.taskId = '';
-
-  bubble.appendChild(fileBtn);
-      if (msg.caption) {
-  var caption = document.createElement('div');
-  caption.textContent = msg.caption;
-  caption.style.whiteSpace = 'pre-wrap';
-  caption.style.marginTop = '8px';
-  bubble.appendChild(caption);
-}
-}
-     // زر عرض مرفقات المهمة
-if (msg.attachmentId) {
-  var fileBtn = document.createElement('button');
-  fileBtn.type = 'button';
-  fileBtn.className = 'btn ghost small';
-
-  fileBtn.textContent = msg.messageType === 'pdf'
-    ? '📄 فتح ملف PDF'
-    : '🖼️ عرض الصورة';
-
-  fileBtn.dataset.attachmentMessage = msg.id;
-  fileBtn.dataset.workspaceId = workspaceId;
-  fileBtn.dataset.taskId = taskId;
-
-  bubble.appendChild(fileBtn);
-
-  if (msg.caption) {
-    var caption = document.createElement('div');
-    caption.textContent = msg.caption;
-    caption.style.whiteSpace = 'pre-wrap';
-    caption.style.marginTop = '8px';
-    bubble.appendChild(caption);
-  }
-}
-      bubble.appendChild(time);
-
-      box.appendChild(bubble);
+      appendChatBubble(box, msg, workspaceId, '');
     });
-
     box.scrollTop = box.scrollHeight;
-
   } catch (err) {
-    box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
+    if (state.spaceId === workspaceId) {
+      box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
+    }
   }
 }
  // ---------- فتح وإغلاق محادثة المهمة ----------
@@ -1690,79 +1679,40 @@ async function loadTaskMessages() {
   var taskId = state.taskChatId;
   var workspaceId = state.spaceId;
   var box = $('task-chat-messages');
-
   if (!taskId || !workspaceId || !box) return;
-
   box.textContent = 'جارٍ تحميل الرسائل...';
 
   try {
     var functions = new Appwrite.Functions(window.fariqna.client);
-
     var execution = await functions.createExecution({
       functionId: "6aef48cf0019c49d0ddd",
       body: JSON.stringify({
-        action: "listMessages",
+        action: 'listMessages',
         workspaceId: workspaceId,
         taskId: taskId
       }),
       async: false,
-      headers: {
-        "content-type": "application/json"
-      }
+      headers: { 'content-type': 'application/json' }
     });
 
-    var result = JSON.parse(execution.responseBody || "{}");
-
+    var result = JSON.parse(execution.responseBody || '{}');
     if (!result.success || !Array.isArray(result.messages)) {
-      throw new Error(result.message || "تعذر تحميل الرسائل");
+      throw new Error(result.message || 'تعذر تحميل الرسائل');
     }
 
-    if (state.taskChatId !== taskId ||
-        state.spaceId !== workspaceId) return;
-
+    if (state.taskChatId !== taskId || state.spaceId !== workspaceId) return;
     box.innerHTML = '';
-
     if (result.messages.length === 0) {
       box.textContent = 'لا توجد رسائل لهذه المهمة حتى الآن.';
       return;
     }
 
     result.messages.forEach(function (msg) {
-      var bubble = document.createElement('div');
-      bubble.className = 'chat-bubble';
-
-      if (me() && msg.senderId === me().id) {
-        bubble.classList.add('mine');
-      }
-
-      var sender = db.users.find(function (u) {
-        return u.id === msg.senderId;
-      });
-
-      var name = document.createElement('div');
-      name.className = 'chat-name';
-      name.textContent = sender ? sender.name : 'عضو';
-
-      var content = document.createElement('div');
-      content.textContent = msg.content || '';
-      content.style.whiteSpace = 'pre-wrap';
-
-      var time = document.createElement('small');
-      time.className = 'muted';
-      time.textContent = new Date(msg.createdAt)
-        .toLocaleString('ar-SA');
-
-      bubble.appendChild(name);
-      bubble.appendChild(content);
-      bubble.appendChild(time);
-
-      box.appendChild(bubble);
+      appendChatBubble(box, msg, workspaceId, taskId);
     });
-
     box.scrollTop = box.scrollHeight;
-
   } catch (err) {
-    if (state.taskChatId === taskId) {
+    if (state.taskChatId === taskId && state.spaceId === workspaceId) {
       box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
     }
   }
@@ -1952,3 +1902,7 @@ document.addEventListener('click', async function (e) {
 </style>
 </body>
 </html>
+
+
+
+
