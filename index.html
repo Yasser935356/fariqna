@@ -438,7 +438,7 @@ textarea { resize: vertical; }
   <form id="room-chat-form" class="form">
     <label>اكتب رسالتك
       <textarea name="message" rows="2" maxlength="2000"
-                placeholder="اكتب رسالة لأعضاء الغرفة..." required></textarea>
+                placeholder="اكتب رسالة لأعضاء الغرفة..." ></textarea>
     </label>
 <label>📎 إرفاق صورة أو ملف PDF
   <input
@@ -509,7 +509,7 @@ textarea { resize: vertical; }
     <form id="task-chat-form" class="form">
       <label>اكتب رسالتك
         <textarea name="message" rows="2" maxlength="2000"
-                  placeholder="اكتب رسالة عن هذه المهمة..." required></textarea>
+                  placeholder="اكتب رسالة عن هذه المهمة..." ></textarea>
       </label>
 <label>📎 إرفاق صورة أو ملف PDF
   <input
@@ -1385,22 +1385,112 @@ dueAt: dueAt
     if (isAdmin) { /* المدير يرى الإنجاز في القائمة */ }
   }
 // ---------- إرسال رسائل المحادثة العامة ----------
+ // ---------- قراءة المرفقات ----------
+function readFileAsBase64(file) {
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+
+    reader.onload = function () {
+      var result = String(reader.result || '');
+      resolve(result.split(',')[1] || '');
+    };
+
+    reader.onerror = function () {
+      reject(new Error('تعذرت قراءة الملف'));
+    };
+
+    reader.readAsDataURL(file);
+  });
+}
+ // ---------- رفع مرفقات المحادثات ----------
+ // ---------- استرجاع مرفقات المحادثات ----------
+async function fetchChatAttachment(messageId, workspaceId, taskId) {
+  var functions = new Appwrite.Functions(window.fariqna.client);
+
+  var execution = await functions.createExecution({
+    functionId: "6aef48cf0019c49d0ddd",
+    body: JSON.stringify({
+      action: "getAttachment",
+      messageId: messageId,
+      workspaceId: workspaceId,
+      taskId: taskId || ""
+    }),
+    async: false,
+    headers: {
+      "content-type": "application/json"
+    }
+  });
+
+  var result = JSON.parse(execution.responseBody || "{}");
+
+  if (!result.success || !result.fileBase64) {
+    throw new Error(result.message || "تعذر فتح المرفق");
+  }
+
+  return result;
+}
+async function uploadChatAttachment(file, workspaceId, taskId) {
+  var allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
+  var ext = file.name.split('.').pop().toLowerCase();
+
+  if (!allowed.includes(ext)) {
+    throw new Error('يُسمح بالصور وملفات PDF فقط');
+  }
+
+  if (file.size > 2 * 1024 * 1024) {
+    throw new Error('الحد الأقصى للملف 2 ميجابايت');
+  }
+
+  var fileBase64 = await readFileAsBase64(file);
+
+  var functions = new Appwrite.Functions(window.fariqna.client);
+
+  var execution = await functions.createExecution({
+    functionId: "6aef48cf0019c49d0ddd",
+    body: JSON.stringify({
+      action: "uploadAttachment",
+      workspaceId: workspaceId,
+      taskId: taskId || "",
+      fileName: file.name,
+      fileBase64: fileBase64
+    }),
+    async: false,
+    headers: {
+      "content-type": "application/json"
+    }
+  });
+
+  var result = JSON.parse(execution.responseBody || "{}");
+
+  if (!result.success) {
+    throw new Error(result.message || 'تعذر رفع المرفق');
+  }
+
+  return result;
+}
 $('room-chat-form').addEventListener('submit', async function (e) {
   e.preventDefault();
 
   var form = this;
   var message = String(new FormData(form).get('message') || '').trim();
 
-  if (!message) {
-    toast('اكتب رسالة أولًا');
-    return;
-  }
+var attachment = form.querySelector('input[name="attachment"]').files[0];
+
+if (!message && !attachment) {
+  toast('اكتب رسالة أو أرفق صورة أو ملف PDF');
+  return;
+}
 
   var btn = form.querySelector('button[type="submit"]');
   if (btn.disabled) return;
   btn.disabled = true;
 
   try {
+   // رفع المرفق إذا اختار المستخدم ملفًا
+if (attachment) {
+  await uploadChatAttachment(attachment, state.spaceId, null);
+}
+   if (message) {
     var functions = new Appwrite.Functions(window.fariqna.client);
 
     var execution = await functions.createExecution({
@@ -1422,7 +1512,7 @@ $('room-chat-form').addEventListener('submit', async function (e) {
     if (!result.success) {
       throw new Error(result.message || "تعذر إرسال الرسالة");
     }
-
+}
     form.reset();
    loadRoomMessages();
     toast('تم إرسال الرسالة بنجاح');
@@ -1499,6 +1589,21 @@ async function loadRoomMessages() {
 
       bubble.appendChild(name);
       bubble.appendChild(content);
+     if (msg.attachmentId) {
+  var fileBtn = document.createElement('button');
+  fileBtn.type = 'button';
+  fileBtn.className = 'btn ghost small';
+
+  fileBtn.textContent = msg.messageType === 'pdf'
+    ? '📄 فتح ملف PDF'
+    : '🖼️ عرض الصورة';
+
+  fileBtn.dataset.attachmentMessage = msg.id;
+  fileBtn.dataset.workspaceId = workspaceId;
+  fileBtn.dataset.taskId = '';
+
+  bubble.appendChild(fileBtn);
+}
       bubble.appendChild(time);
 
       box.appendChild(bubble);
@@ -1646,17 +1751,23 @@ $('task-chat-form').addEventListener('submit', async function (e) {
     return;
   }
 
-  if (!message) {
-    toast('اكتب رسالة أولًا');
-    return;
-  }
+var attachment = form.querySelector('input[name="attachment"]').files[0];
 
+if (!message && !attachment) {
+  toast('اكتب رسالة أو أرفق صورة أو ملف PDF');
+  return;
+}
   var btn = form.querySelector('button[type="submit"]');
 
   if (btn.disabled) return;
   btn.disabled = true;
 
   try {
+   // رفع المرفق في محادثة المهمة
+if (attachment) {
+  await uploadChatAttachment(attachment, workspaceId, taskId);
+}
+   if (message) {
     var functions = new Appwrite.Functions(window.fariqna.client);
 
     var execution = await functions.createExecution({
@@ -1679,7 +1790,7 @@ $('task-chat-form').addEventListener('submit', async function (e) {
     if (!result.success) {
       throw new Error(result.message || "تعذر إرسال الرسالة");
     }
-
+}
     if (state.taskChatId === taskId &&
         state.spaceId === workspaceId) {
       form.reset();
@@ -1689,6 +1800,67 @@ $('task-chat-form').addEventListener('submit', async function (e) {
 
   } catch (err) {
     toast('تعذر إرسال الرسالة: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+ // ---------- فتح مرفقات المحادثات ----------
+document.addEventListener('click', async function (e) {
+  var btn = e.target.closest('[data-attachment-message]');
+  if (!btn || btn.disabled) return;
+
+  var preview = window.open('about:blank', '_blank');
+
+  if (!preview) {
+    toast('اسمح بفتح النوافذ المنبثقة لعرض المرفق');
+    return;
+  }
+
+  preview.document.body.textContent = 'جارٍ تحميل المرفق...';
+  btn.disabled = true;
+
+  try {
+    var result = await fetchChatAttachment(
+      btn.dataset.attachmentMessage,
+      btn.dataset.workspaceId,
+      btn.dataset.taskId || ''
+    );
+
+    var binary = atob(result.fileBase64);
+    var bytes = new Uint8Array(binary.length);
+
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    var ext = String(result.fileName || '')
+      .split('.').pop().toLowerCase();
+
+    var types = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      pdf: 'application/pdf'
+    };
+
+    if (!types[ext]) {
+      throw new Error('نوع الملف غير مدعوم');
+    }
+
+    var blob = new Blob([bytes], { type: types[ext] });
+    var url = URL.createObjectURL(blob);
+
+    preview.location.href = url;
+
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 600000);
+
+  } catch (err) {
+    preview.close();
+    toast('تعذر فتح المرفق: ' + err.message);
   } finally {
     btn.disabled = false;
   }
