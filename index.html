@@ -7,12 +7,22 @@
 
 
 
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>فريقنا - إدارة المهام الجماعية</title>
+<meta name="theme-color" content="#5B4FE8">
+<meta name="description" content="فريقنا لتنظيم المهام الجماعية والمحادثات والإنجازات">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" type="image/png" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap">
 <style>/* inlined style.css */
@@ -367,7 +377,7 @@ textarea { resize: vertical; }
       <button class="btn primary block" type="submit">إنشاء الحساب</button>
     </form>
     <p class="error" id="auth-error" role="alert"></p>
-    <p class="note">ملاحظة: البيانات تُحفظ في هذا المتصفح. لمشاركتها بين الأجهزة يلزم ربط قاعدة بيانات مشتركة.</p>
+    <p class="note">معلومات الغرف والمهام والمحادثات تُحفظ وتتزامن عبر Appwrite.</p>
   </div>
 </section>
 
@@ -377,6 +387,7 @@ textarea { resize: vertical; }
     <div class="brand-small"><div class="logo sm">ف</div><span>فريقنا</span></div>
     <div class="top-actions">
       <span id="user-name" class="muted"></span>
+      <button class="btn ghost" id="install-app-btn" type="button">📱 تثبيت فريقنا</button>
       <button class="btn ghost" id="logout-btn">خروج</button>
     </div>
   </header>
@@ -416,6 +427,10 @@ textarea { resize: vertical; }
       <div>
         <h2 id="space-name"></h2>
         <p class="muted" id="space-desc"></p>
+      </div>
+      <div class="head-buttons hidden" id="admin-report-actions">
+        <button class="btn ghost" id="show-achievements" type="button">📊 إنجاز الأعضاء</button>
+        <button class="btn ghost" id="show-ranking" type="button">🏅 ترتيب الأعضاء</button>
       </div>
       <div class="invite-box" id="invite-box">
         <span class="muted">رمز الدعوة</span>
@@ -492,6 +507,22 @@ textarea { resize: vertical; }
         </div>
       </aside>
     </div>
+  </main>
+</section>
+
+<!-- تقارير المدير: صفحات كاملة منفصلة -->
+<section id="achievements-screen" class="screen report-screen">
+  <header class="topbar"><div class="brand-small"><button class="btn ghost" type="button" data-back-to-space>↩️ رجوع للغرفة</button><strong>📊 إنجاز الأعضاء</strong></div></header>
+  <main class="container">
+    <div class="report-hero"><h2>📊 إنجاز الأعضاء</h2><p>متابعة حالة إنجاز كل عضو في كل مهمة.</p></div>
+    <div id="achievements-content" class="report-items"></div>
+  </main>
+</section>
+<section id="ranking-screen" class="screen report-screen">
+  <header class="topbar"><div class="brand-small"><button class="btn ghost" type="button" data-back-to-space>↩️ رجوع للغرفة</button><strong>🏅 ترتيب الأعضاء</strong></div></header>
+  <main class="container">
+    <div class="report-hero"><h2>🏅 ترتيب الأعضاء</h2><p>الترتيب حسب عدد المهام التي أنجزها كل عضو بشكل مستقل.</p></div>
+    <div id="ranking-content" class="ranking-items"></div>
   </main>
 </section>
 
@@ -573,7 +604,7 @@ textarea { resize: vertical; }
     });
   }
   var STATUS = { todo: 'لم تبدأ', doing: 'قيد التنفيذ', done: 'مكتملة' };
-  var state = { view: 'auth', spaceId: null, filter: 'all' };
+  var state = { view: 'auth', spaceId: null, filter: 'all', taskChatId: null };
 
   function toast(msg) {
     var t = $('toast');
@@ -582,12 +613,16 @@ textarea { resize: vertical; }
     toast._t = setTimeout(function () { t.classList.remove('show'); }, 2200);
   }
   function show(view) {
-    ['auth-screen', 'spaces-screen', 'space-screen'].forEach(function (id) {
+    ['auth-screen', 'spaces-screen', 'space-screen', 'achievements-screen', 'ranking-screen'].forEach(function (id) {
       $(id).classList.remove('active');
     });
-    var map = { auth: 'auth-screen', spaces: 'spaces-screen', space: 'space-screen' };
+    var map = { auth:'auth-screen', spaces:'spaces-screen', space:'space-screen', achievements:'achievements-screen', ranking:'ranking-screen' };
     $(map[view]).classList.add('active');
     state.view = view;
+    if (view !== 'space') {
+      $('task-chat-modal').classList.add('hidden');
+      state.taskChatId = null;
+    }
     window.scrollTo(0, 0);
   }
   function me() { return db.users.find(function (u) { return u.id === db.session; }) || null; }
@@ -1006,81 +1041,55 @@ loadRoomMessages();
   }).catch(function (err) {
     toast("تعذر استرجاع الأعضاء: " + err.message);
   });
-    // استرجاع مهام الغرفة من Appwrite
-  functions.createExecution({
-    functionId: "6aef48cf0019c49d0ddd",
-    body: JSON.stringify({
-      action: "listTasks",
-      workspaceId: id
-    }),
-    async: false,
-    headers: {
-      "content-type": "application/json"
-    }
-  }).then(function (execution) {
+  // جلب المهام في كل مرة نفتح فيها الغرفة.
+  refreshTasks(id, false);
 
-    var result = JSON.parse(execution.responseBody || "{}");
-
-    if (!result.success || !Array.isArray(result.tasks)) {
-      throw new Error(result.message || "تعذر استرجاع المهام");
-    }
-
- 
-    // تتبع المهام المحفوظة في Appwrite لكل غرفة
-    if (!db.syncedTaskIds) {
-      db.syncedTaskIds = {};
-    }
-
-    var previousIds = db.syncedTaskIds[id] || [];
-
-    var currentIds = result.tasks.map(function (task) {
-      return task.id;
-    });
-
-    // إزالة المهام السحابية المحذوفة فقط
-    if (result.tasks.length < 100) {
-      db.tasks = db.tasks.filter(function (task) {
-        if (task.spaceId !== id) return true;
-        if (!previousIds.includes(task.id)) return true;
-        return currentIds.includes(task.id);
-      });
-    }
-
-    db.syncedTaskIds[id] = currentIds;
-        result.tasks.forEach(function (remoteTask) {
-      var existing = db.tasks.find(function (task) {
-        return task.id === remoteTask.id;
-      });
-      // تحديث المهام الموجودة وإضافة المهام الجديدة
-      if (existing) {
-        existing.status = remoteTask.status;
-        existing.assignees = remoteTask.assignees;
-existing.dueAt = remoteTask.dueAt || null;
-       existing.reward = remoteTask.reward || "";
-        if (remoteTask.status !== 'done') {
-          existing.completedBy = null;
-        }
-      } else {
-        db.tasks.push(
-          Object.assign({ completedBy: null }, remoteTask)
-        );
-      }
-
-    });
-
-    save(db);
-
-    if (state.spaceId === id && state.view === "space") {
-      renderTasks();
-      renderMembers();
-    }
-
-    renderSpaces();
-
-  }).catch(function (err) {
-    toast("تعذر استرجاع المهام: " + err.message);
-  });
 }
+
+  // ---------- تحديث المهام من Appwrite دون خسارة البيانات المحلية ----------
+  var taskRefreshRunning = {};
+  async function refreshTasks(workspaceId, silent) {
+    if (!workspaceId || taskRefreshRunning[workspaceId]) return;
+    taskRefreshRunning[workspaceId] = true;
+    try {
+      var functions = new Appwrite.Functions(window.fariqna.client);
+      var execution = await functions.createExecution({
+        functionId: "6aef48cf0019c49d0ddd",
+        body: JSON.stringify({action:"listTasks",workspaceId:workspaceId}),
+        async:false,headers:{"content-type":"application/json"}
+      });
+      var result=JSON.parse(execution.responseBody||"{}");
+      if (!result.success || !Array.isArray(result.tasks)) {
+        throw new Error(result.message||"تعذر استرجاع المهام");
+      }
+      if (!db.syncedTaskIds) db.syncedTaskIds={};
+      var previousIds=db.syncedTaskIds[workspaceId]||[];
+      var currentIds=result.tasks.map(function(t){return t.id;});
+      // لا نحذف ما لم نتمكن من جلب جميع المهام؛ الخادم يعيد حتى 100 مهمة.
+      if (result.tasks.length<100) {
+        db.tasks=db.tasks.filter(function(t){
+          if(t.spaceId!==workspaceId)return true;
+          if(!previousIds.includes(t.id))return true;
+          return currentIds.includes(t.id);
+        });
+      }
+      db.syncedTaskIds[workspaceId]=currentIds;
+      result.tasks.forEach(function(remoteTask){
+        var old=db.tasks.find(function(t){return t.id===remoteTask.id;});
+        if(old) Object.assign(old, remoteTask);
+        else db.tasks.push(Object.assign({completedBy:null},remoteTask));
+      });
+      save(db);
+      if (state.spaceId===workspaceId) {
+        if (state.view==='space') {renderTasks();renderMembers();}
+        if (state.view==='achievements') renderAchievements();
+        if (state.view==='ranking') renderRanking();
+      }
+      if(state.view==='spaces')renderSpaces();
+    } catch(err) {
+      if(!silent)toast('تعذر استرجاع المهام: '+err.message);
+    } finally { delete taskRefreshRunning[workspaceId]; }
+  }
 
   $('back-btn').addEventListener('click', function () { renderSpaces(); show('spaces'); });
 
@@ -1111,6 +1120,7 @@ existing.dueAt = remoteTask.dueAt || null;
     $('invite-code').textContent = isAdmin ? s.code : '••••••';
     $('invite-box').classList.toggle('hidden', !isAdmin);
     $('new-task-panel').classList.toggle('hidden', !isAdmin);
+    $('admin-report-actions').classList.toggle('hidden', !isAdmin);
 
     var opts = db.members.filter(function (x) { return x.spaceId === s.id; }).map(function (x) {
       var u = db.users.find(function (y) { return y.id === x.userId; });
@@ -1121,63 +1131,61 @@ existing.dueAt = remoteTask.dueAt || null;
     renderTasks(); renderMembers();
   }
 
-  function renderTasks() {
-    var s = state.spaceId;
-    var list = db.tasks.filter(function (t) { return t.spaceId === s; })
-      .filter(function (t) { return state.filter === 'all' || t.status === state.filter; });
-    var m = myMembership(s);
-    var isAdmin = m && m.role === 'admin';
-    var box = $('tasks-list');
-    box.innerHTML = '';
-    list.forEach(function (t) {
-      var names = t.assignees.map(function (uid2) {
-        var u = db.users.find(function (y) { return y.id === uid2; }); return u ? u.name : '';
-      }).filter(Boolean).join('، ') || 'غير معيّنة';
-      var mine = t.assignees.indexOf(me().id) !== -1 || isAdmin;
-      var statusBtns = Object.keys(STATUS).map(function (k) {
-        return '<button class="status-btn ' + k + (t.status === k ? ' on' : '') + '" data-id="' + t.id + '" data-status="' + k + '"' +
-          (mine ? '' : ' disabled') + '>' + STATUS[k] + '</button>';
-      }).join('');
-      var done = t.completedBy ? '<span>أنجزها: ' + esc(t.completedBy) + '</span>' : '';
-     var dueInfo = '';
-
-if (t.dueAt) {
-  var dueDate = new Date(t.dueAt);
-
-  if (!Number.isNaN(dueDate.getTime())) {
-    var dueText = dueDate.toLocaleString('ar-SA-u-ca-gregory', {
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    });
-
-    var overdue = t.status !== 'done' && dueDate.getTime() < Date.now();
-
-    dueInfo = '<span>' +
-      (overdue ? '🔴 متأخرة — ' : '📅 موعد التسليم: ') +
-      esc(dueText) +
-      '</span>';
+  // ---------- الحالة المستقلة لكل عضو ----------
+  function memberTaskStatus(task,userId) {
+    var statuses=task.assigneeStatuses||{};
+    if (Object.prototype.hasOwnProperty.call(statuses,userId)) return statuses[userId];
+    return task.status||'todo'; // توافق مع المهام القديمة.
   }
-}
-      var el = document.createElement('article');
-      el.className = 'task ' + t.status;
-      el.innerHTML = '<h4 class="task-title">' + esc(t.title) + '</h4>' +
-        (t.details ? '<p class="task-details">' + esc(t.details) + '</p>' : '') +
-      '<div class="task-meta"><span>المعيّنون: ' + esc(names) + '</span>' + done + dueInfo + (t.reward ? '<span>🎁 مكافأة المهمة: ' + esc(t.reward) + '</span>' : '') + '</div>' +
-        '<div class="task-row"><div class="status-group">' + statusBtns + '</div>' +
-        (isAdmin ? '<button class="icon-btn" data-del="' + t.id + '">حذف</button>' : '') + '</div>';
-     // زر محادثة المهمة
-if (mine) {
-  var chatBtn = document.createElement('button');
-  chatBtn.type = 'button';
-  chatBtn.className = 'btn ghost small';
-  chatBtn.textContent = '💬 محادثة المهمة';
-  chatBtn.dataset.taskChat = t.id;
-  chatBtn.style.marginTop = '10px';
-  el.appendChild(chatBtn);
-}
+  function renderTasks() {
+    var spaceId=state.spaceId;
+    var tasks=db.tasks.filter(function(t){return t.spaceId===spaceId;})
+      .filter(function(t){return state.filter==='all'||t.status===state.filter;});
+    var membership=myMembership(spaceId);
+    var isAdmin=!!(membership&&membership.role==='admin');
+    var box=$('tasks-list');
+    box.innerHTML='';
+    tasks.forEach(function(task){
+      var assignees=Array.isArray(task.assignees)?task.assignees:[];
+      var names=assignees.map(function(id){
+        var u=db.users.find(function(x){return x.id===id;});return u?u.name:'عضو';
+      }).join('، ')||'غير معيّنة';
+      var isAssigned=assignees.includes(me().id);
+      var canChange=isAssigned||(isAdmin&&assignees.length===0);
+      var canChat=isAssigned||isAdmin;
+      var personalStatus=isAssigned?memberTaskStatus(task,me().id):task.status;
+      var buttons=Object.keys(STATUS).map(function(code){
+        return '<button class="status-btn '+code+(personalStatus===code?' on':'')+'" data-id="'+esc(task.id)+'" data-status="'+code+'"'+(canChange?'':' disabled')+'>'+STATUS[code]+'</button>';
+      }).join('');
+      var dueInfo='';
+      if(task.dueAt){
+        var dueDate=new Date(task.dueAt);
+        if(!Number.isNaN(dueDate.getTime())){
+          var dueText=dueDate.toLocaleString('ar-SA-u-ca-gregory',{dateStyle:'medium',timeStyle:'short'});
+          var overdue=task.status!=='done'&&dueDate.getTime()<Date.now();
+          dueInfo='<span>'+(overdue?'🔴 متأخرة — ':'📅 موعد التسليم: ')+esc(dueText)+'</span>';
+        }
+      }
+      var doneCount=assignees.filter(function(id){return memberTaskStatus(task,id)==='done';}).length;
+      var progress=assignees.length?('<div class="task-progress">✅ أنجزها '+doneCount+' من '+assignees.length+' أعضاء'+(isAssigned?' • حالتك: '+STATUS[personalStatus]:'')+'</div>'):'';
+      var el=document.createElement('article');
+      el.className='task '+(task.status||'todo');
+      el.innerHTML='<h4 class="task-title">'+esc(task.title)+'</h4>'+
+        (task.details?'<p class="task-details">'+esc(task.details)+'</p>':'')+
+        '<div class="task-meta"><span>المعيّنون: '+esc(names)+'</span>'+dueInfo+
+        (task.reward?'<span>🎁 مكافأة المهمة: '+esc(task.reward)+'</span>':'')+'</div>'+
+        progress+'<div class="task-row"><div class="status-group">'+buttons+'</div>'+
+        (isAdmin?'<button class="icon-btn" data-del="'+esc(task.id)+'">حذف</button>':'')+'</div>'+
+        (!canChange&&assignees.length?'<small class="muted">تغيير الحالة متاح لكل عضو مكلّف بحسابه فقط.</small>':'');
+      if(canChat){
+        var chatBtn=document.createElement('button');
+        chatBtn.type='button';chatBtn.className='btn ghost small';
+        chatBtn.textContent='💬 محادثة المهمة';chatBtn.dataset.taskChat=task.id;
+        chatBtn.style.marginTop='10px';el.appendChild(chatBtn);
+      }
       box.appendChild(el);
     });
-    $('tasks-empty').classList.toggle('hidden', list.length > 0);
+    $('tasks-empty').classList.toggle('hidden',tasks.length>0);
   }
 
 $('tasks-list').addEventListener('click', async function (e) {
@@ -1210,8 +1218,15 @@ $('tasks-list').addEventListener('click', async function (e) {
         throw new Error(result.message || "تعذر تحديث المهمة");
       }
 
-      t.status = result.task.status;
-      t.completedBy = t.status === 'done' ? me().name : null;
+       t.status = result.task.status;
+       if (result.task.assigneeStatuses) {
+         t.assigneeStatuses = result.task.assigneeStatuses;
+       } else {
+         // توافق مؤقت إذا لم يُنشر كود Appwrite الجديد بعد.
+         t.assigneeStatuses = t.assigneeStatuses || {};
+         t.assigneeStatuses[me().id] = newStatus;
+       }
+       t.completedBy = null;
 
       save(db);
       renderTasks();
@@ -1378,21 +1393,79 @@ dueAt: dueAt
 });
 
   function renderMembers() {
-    var m = myMembership(state.spaceId);
-    var isAdmin = m && m.role === 'admin';
-    var ul = $('members-list');
-    ul.innerHTML = '';
-    db.members.filter(function (x) { return x.spaceId === state.spaceId; }).forEach(function (x) {
-      var u = db.users.find(function (y) { return y.id === x.userId; });
-      if (!u) return;
-      var count = db.tasks.filter(function (t) { return t.spaceId === state.spaceId && t.status === 'done' && t.completedBy === u.name; }).length;
-      var li = document.createElement('li');
-      li.innerHTML = '<div class="member-info"><span class="avatar">' + esc(u.name.charAt(0)) + '</span><span>' + esc(u.name) + '</span></div>' +
-        '<span class="stat">' + (x.role === 'admin' ? 'مدير' : count + ' مهمة مكتملة') + '</span>';
+    var ul=$('members-list');
+    ul.innerHTML='';
+    db.members.filter(function(m){return m.spaceId===state.spaceId;}).forEach(function(m){
+      var u=db.users.find(function(x){return x.id===m.userId;});
+      if(!u)return;
+      var completed=db.tasks.filter(function(t){
+        return t.spaceId===state.spaceId &&
+          (t.assignees||[]).includes(u.id) && memberTaskStatus(t,u.id)==='done';
+      }).length;
+      var li=document.createElement('li');
+      li.innerHTML='<div class="member-info"><span class="avatar">'+esc(u.name.charAt(0))+'</span><span>'+esc(u.name)+'</span></div>'+
+        '<span class="stat">'+(m.role==='admin'?'👑 مدير • ':'')+completed+' مكتملة</span>';
       ul.appendChild(li);
     });
-    if (isAdmin) { /* المدير يرى الإنجاز في القائمة */ }
   }
+  // ---------- صفحات المدير للإنجازات والترتيب ----------
+  function canViewReports(){
+    var m=myMembership(state.spaceId);
+    return !!(m&&m.role==='admin');
+  }
+  function renderAchievements(){
+    var box=$('achievements-content');box.innerHTML='';
+    if(!canViewReports()){show('space');return;}
+    var tasks=db.tasks.filter(function(t){return t.spaceId===state.spaceId;});
+    if(!tasks.length){box.innerHTML='<div class="report-empty">لا توجد مهام حتى الآن.</div>';return;}
+    tasks.forEach(function(task){
+      var div=document.createElement('article');div.className='report-card';
+      var ids=task.assignees||[];
+      var head=document.createElement('h3');head.textContent=task.title;div.appendChild(head);
+      var summary=document.createElement('p');summary.className='muted';
+      summary.textContent='المكافأة: '+(task.reward||'—')+' • '+ids.filter(function(id){return memberTaskStatus(task,id)==='done';}).length+' / '+ids.length+' مكتملة';
+      div.appendChild(summary);
+      var progress=document.createElement('div');progress.className='progress-list';
+      if(!ids.length){progress.textContent='لم يتم تكليف أعضاء بهذه المهمة.';}
+      ids.forEach(function(id){
+        var u=db.users.find(function(x){return x.id===id;});
+        var status=memberTaskStatus(task,id);
+        var chip=document.createElement('span');
+        chip.className='progress-pill '+status;
+        chip.textContent=(u?u.name:'عضو')+' — '+(STATUS[status]||status);
+        progress.appendChild(chip);
+      });
+      div.appendChild(progress);box.appendChild(div);
+    });
+  }
+  function renderRanking(){
+    var box=$('ranking-content');box.innerHTML='';
+    if(!canViewReports()){show('space');return;}
+    var allTasks=db.tasks.filter(function(t){return t.spaceId===state.spaceId;});
+    var ranked=db.members.filter(function(m){return m.spaceId===state.spaceId;}).map(function(m){
+      var u=db.users.find(function(x){return x.id===m.userId;});
+      var count=allTasks.filter(function(t){return (t.assignees||[]).includes(m.userId)&&memberTaskStatus(t,m.userId)==='done';}).length;
+      return {name:u?u.name:'عضو',role:m.role,count:count};
+    }).sort(function(a,b){return b.count-a.count||a.name.localeCompare(b.name,'ar');});
+    if(!ranked.length){box.innerHTML='<div class="report-empty">لا يوجد أعضاء بعد.</div>';return;}
+    ranked.forEach(function(item,i){
+      var medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'🏅';
+      var card=document.createElement('div');card.className='ranking-card';
+      card.innerHTML='<div class="rank-head"><div class="rank-name">'+medal+' '+(i+1)+'. '+esc(item.name)+(item.role==='admin'?' <span class="badge">مدير</span>':'')+'</div><div class="rank-number">'+item.count+' ✅</div></div>';
+      box.appendChild(card);
+    });
+  }
+  $('show-achievements').addEventListener('click',function(){
+    if(!canViewReports())return toast('صفحة المدير فقط');
+    show('achievements');renderAchievements();refreshTasks(state.spaceId,true);
+  });
+  $('show-ranking').addEventListener('click',function(){
+    if(!canViewReports())return toast('صفحة المدير فقط');
+    show('ranking');renderRanking();refreshTasks(state.spaceId,true);
+  });
+  document.querySelectorAll('[data-back-to-space]').forEach(function(btn){
+    btn.addEventListener('click',function(){renderSpace();show('space');loadRoomMessages();});
+  });
 // ---------- إرسال رسائل المحادثة العامة ----------
  // ---------- قراءة المرفقات ----------
 function readFileAsBase64(file) {
@@ -1596,45 +1669,42 @@ function appendChatBubble(box, msg, workspaceId, taskId) {
 }
 
 // ---------- تحميل رسائل المحادثة العامة ----------
-async function loadRoomMessages() {
-  var workspaceId = state.spaceId;
-  var box = $('room-messages');
-  if (!workspaceId || !box) return;
-  box.textContent = 'جارٍ تحميل الرسائل...';
-
+var roomLoadKey=null;
+async function loadRoomMessages(silent) {
+  var workspaceId=state.spaceId;
+  var box=$('room-messages');
+  if(!workspaceId||!box)return;
+  if(roomLoadKey===workspaceId)return;
+  roomLoadKey=workspaceId;
+  if(!silent)box.textContent='جارٍ تحميل الرسائل...';
   try {
-    var functions = new Appwrite.Functions(window.fariqna.client);
-    var execution = await functions.createExecution({
-      functionId: "6aef48cf0019c49d0ddd",
-      body: JSON.stringify({
-        action: 'listMessages',
-        workspaceId: workspaceId
-      }),
-      async: false,
-      headers: { 'content-type': 'application/json' }
+    var functions=new Appwrite.Functions(window.fariqna.client);
+    var execution=await functions.createExecution({
+      functionId:"6aef48cf0019c49d0ddd",
+      body:JSON.stringify({action:'listMessages',workspaceId:workspaceId}),
+      async:false,headers:{'content-type':'application/json'}
     });
-
-    var result = JSON.parse(execution.responseBody || '{}');
-    if (!result.success || !Array.isArray(result.messages)) {
-      throw new Error(result.message || 'تعذر تحميل الرسائل');
+    var result=JSON.parse(execution.responseBody||'{}');
+    if(!result.success||!Array.isArray(result.messages)){
+      throw new Error(result.message||'تعذر تحميل الرسائل');
     }
-
-    if (state.spaceId !== workspaceId) return;
-    box.innerHTML = '';
-    if (result.messages.length === 0) {
-      box.textContent = 'لا توجد رسائل حتى الآن.';
-      return;
+    if(state.spaceId!==workspaceId||state.view!=='space')return;
+    var signature=JSON.stringify(result.messages.map(function(m){return [m.id,m.content,m.caption,m.attachmentId];}));
+    if(silent&&box.dataset.signature===signature)return;
+    var stickToBottom=(!silent)||box.scrollHeight-box.scrollTop-box.clientHeight<85;
+    var previousScroll=box.scrollTop;
+    box.innerHTML='';
+    if(!result.messages.length){
+      box.textContent='لا توجد رسائل حتى الآن.';
+    }else{
+      result.messages.forEach(function(m){appendChatBubble(box,m,workspaceId,'');});
     }
-
-    result.messages.forEach(function (msg) {
-      appendChatBubble(box, msg, workspaceId, '');
-    });
-    box.scrollTop = box.scrollHeight;
-  } catch (err) {
-    if (state.spaceId === workspaceId) {
-      box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
-    }
-  }
+    box.dataset.signature=signature;
+    if(stickToBottom)box.scrollTop=box.scrollHeight;
+    else box.scrollTop=previousScroll;
+  }catch(err){
+    if(!silent&&state.spaceId===workspaceId)box.textContent='تعذر تحميل الرسائل: '+err.message;
+  }finally{ if(roomLoadKey===workspaceId)roomLoadKey=null; }
 }
  // ---------- فتح وإغلاق محادثة المهمة ----------
 $('tasks-list').addEventListener('click', function (e) {
@@ -1657,6 +1727,7 @@ $('tasks-list').addEventListener('click', function (e) {
   }
 
   state.taskChatId = task.id;
+  delete $('task-chat-messages').dataset.signature;
 
   $('task-chat-title').textContent =
     '💬 محادثة المهمة: ' + task.title;
@@ -1675,47 +1746,41 @@ $('task-chat-close').addEventListener('click', function () {
   state.taskChatId = null;
 });
  // ---------- تحميل رسائل محادثة المهمة ----------
-async function loadTaskMessages() {
-  var taskId = state.taskChatId;
-  var workspaceId = state.spaceId;
-  var box = $('task-chat-messages');
-  if (!taskId || !workspaceId || !box) return;
-  box.textContent = 'جارٍ تحميل الرسائل...';
-
+var taskLoadKey=null;
+async function loadTaskMessages(silent) {
+  var taskId=state.taskChatId;
+  var workspaceId=state.spaceId;
+  var box=$('task-chat-messages');
+  if(!taskId||!workspaceId||!box)return;
+  var key=workspaceId+':'+taskId;
+  if(taskLoadKey===key)return;
+  taskLoadKey=key;
+  if(!silent)box.textContent='جارٍ تحميل الرسائل...';
   try {
-    var functions = new Appwrite.Functions(window.fariqna.client);
-    var execution = await functions.createExecution({
-      functionId: "6aef48cf0019c49d0ddd",
-      body: JSON.stringify({
-        action: 'listMessages',
-        workspaceId: workspaceId,
-        taskId: taskId
-      }),
-      async: false,
-      headers: { 'content-type': 'application/json' }
+    var functions=new Appwrite.Functions(window.fariqna.client);
+    var execution=await functions.createExecution({
+      functionId:"6aef48cf0019c49d0ddd",
+      body:JSON.stringify({action:'listMessages',workspaceId:workspaceId,taskId:taskId}),
+      async:false,headers:{'content-type':'application/json'}
     });
-
-    var result = JSON.parse(execution.responseBody || '{}');
-    if (!result.success || !Array.isArray(result.messages)) {
-      throw new Error(result.message || 'تعذر تحميل الرسائل');
+    var result=JSON.parse(execution.responseBody||'{}');
+    if(!result.success||!Array.isArray(result.messages)){
+      throw new Error(result.message||'تعذر تحميل رسائل المهمة');
     }
-
-    if (state.taskChatId !== taskId || state.spaceId !== workspaceId) return;
-    box.innerHTML = '';
-    if (result.messages.length === 0) {
-      box.textContent = 'لا توجد رسائل لهذه المهمة حتى الآن.';
-      return;
-    }
-
-    result.messages.forEach(function (msg) {
-      appendChatBubble(box, msg, workspaceId, taskId);
-    });
-    box.scrollTop = box.scrollHeight;
-  } catch (err) {
-    if (state.taskChatId === taskId && state.spaceId === workspaceId) {
-      box.textContent = 'تعذر تحميل الرسائل: ' + err.message;
-    }
-  }
+    if(state.taskChatId!==taskId||state.spaceId!==workspaceId||$('task-chat-modal').classList.contains('hidden'))return;
+    var signature=JSON.stringify(result.messages.map(function(m){return [m.id,m.content,m.caption,m.attachmentId];}));
+    if(silent&&box.dataset.signature===signature)return;
+    var stickToBottom=(!silent)||box.scrollHeight-box.scrollTop-box.clientHeight<85;
+    var previousScroll=box.scrollTop;
+    box.innerHTML='';
+    if(!result.messages.length)box.textContent='لا توجد رسائل لهذه المهمة حتى الآن.';
+    else result.messages.forEach(function(m){appendChatBubble(box,m,workspaceId,taskId);});
+    box.dataset.signature=signature;
+    if(stickToBottom)box.scrollTop=box.scrollHeight;
+    else box.scrollTop=previousScroll;
+  }catch(err){
+    if(!silent&&state.taskChatId===taskId&&state.spaceId===workspaceId)box.textContent='تعذر تحميل الرسائل: '+err.message;
+  }finally{if(taskLoadKey===key)taskLoadKey=null;}
 }
  // ---------- إرسال رسائل محادثة المهمة ----------
 $('task-chat-form').addEventListener('submit', async function (e) {
@@ -1847,6 +1912,46 @@ document.addEventListener('click', async function (e) {
     btn.disabled = false;
   }
 });
+  // ---------- تحديث المحادثات تلقائياً، كل 5 ثوانٍ ----------
+  var lastTaskRefresh=0;
+  setInterval(function(){
+    if(document.hidden||!me())return;
+    if(state.view==='space'){
+      loadRoomMessages(true);
+      if(state.taskChatId&&!$('task-chat-modal').classList.contains('hidden')){
+        loadTaskMessages(true);
+      }
+    }
+    if(['space','achievements','ranking'].includes(state.view) && state.spaceId && Date.now()-lastTaskRefresh>20000){
+      lastTaskRefresh=Date.now();
+      refreshTasks(state.spaceId,true);
+    }
+  },5000);
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden||state.view!=='space')return;
+    loadRoomMessages(true);
+    if(state.taskChatId)loadTaskMessages(true);
+  });
+  // ---------- تثبيت الموقع كتطبيق (PWA) ----------
+  var pendingInstall=null;
+  window.addEventListener('beforeinstallprompt',function(e){
+    e.preventDefault();pendingInstall=e;
+  });
+  $('install-app-btn').addEventListener('click',async function(){
+    if(pendingInstall){
+      pendingInstall.prompt();
+      await pendingInstall.userChoice;
+      pendingInstall=null;
+    }else{
+      toast('من خيارات المتصفح اختر: تثبيت التطبيق أو إضافة إلى الشاشة الرئيسية');
+    }
+  });
+  if('serviceWorker' in navigator && location.protocol==='https:'){
+    window.addEventListener('load',function(){
+      navigator.serviceWorker.register('./sw.js').catch(function(err){console.warn('تعذر تشغيل وضع التثبيت',err);});
+    });
+  }
+
   // ---------- بدء التطبيق ----------
  account.get().then(function (appUser) {
   saveUser(appUser);
@@ -1899,9 +2004,28 @@ document.addEventListener('click', async function (e) {
   font-weight: bold;
   font-size: 13px;
 }
+
+/* ---------- لوحات الإنجازات والتجاوب ---------- */
+.report-hero{background:linear-gradient(120deg,#695AF3,#8D73F2);color:#fff;border-radius:22px;padding:28px;margin-bottom:20px}
+.report-hero h2{color:#fff;font-size:27px}.report-hero p{color:#f1edff;margin:6px 0 0}
+.report-items,.ranking-items{display:flex;flex-direction:column;gap:14px}
+.report-card,.ranking-card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:var(--shadow)}
+.report-card h3{margin:0 0 12px}.report-card .muted{font-size:14px}
+.progress-list{display:flex;flex-wrap:wrap;gap:8px}
+.progress-pill{border-radius:999px;background:#f0edff;padding:5px 11px;font-size:13px;font-weight:700;color:#35304b}
+.progress-pill.done{background:#dcfce7;color:#166534}.progress-pill.doing{background:#fef3c7;color:#92400e}.progress-pill.todo{background:#f3f4f6;color:#4b5563}
+.rank-head{display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap}
+.rank-name{font-size:18px;font-weight:800}.rank-number{font-size:23px;font-weight:800;color:var(--primary-dark)}
+.task-progress{margin-top:9px;color:var(--primary-dark);font-size:13px;font-weight:700}
+.report-empty{background:#fff;border-radius:16px;padding:24px;text-align:center;color:var(--muted)}
+@media(max-width:600px){.report-hero{padding:20px}.report-hero h2{font-size:23px}.invite-box{width:100%}.head-buttons{width:100%}.head-buttons .btn{flex:1}}
 </style>
 </body>
 </html>
+
+
+
+
 
 
 
