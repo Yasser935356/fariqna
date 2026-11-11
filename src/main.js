@@ -356,7 +356,7 @@ if (body?.action === "uploadAttachment") {
     .slice(0, 120);
 
   const base64 = String(body.fileBase64 || "");
-
+const caption = String(body.caption || "").trim().slice(0, 2000);
   // الحد المبدئي: 2 ميجابايت للملف الواحد
   if (
     !workspaceId ||
@@ -419,6 +419,7 @@ if (body?.action === "uploadAttachment") {
         workspaceId,
         senderId: user.$id,
         content: filename,
+        caption: caption,
         messageType: fileType,
         attachmentId: uploaded.$id,
         ...(taskId ? { taskId } : {})
@@ -609,6 +610,7 @@ if (body?.action === "getAttachment") {
         taskId: msg.taskId || null,
         senderId: msg.senderId,
         content: msg.content || "",
+        caption: msg.caption || "",
         messageType: msg.messageType,
         attachmentId: msg.attachmentId || null,
         createdAt: msg.$createdAt
