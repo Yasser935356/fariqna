@@ -1,17 +1,7 @@
 
 
 
-
-
-
-
-
-
-
-
-
-
-import { Client, Account, TablesDB, ID, Query, Users, Storage, Permission, Role } from "node-appwrite";
+import { Client, Account, TablesDB, ID, Query, Users, Storage } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { randomInt } from "node:crypto";
 
@@ -32,87 +22,49 @@ function generateCode() {
 
   return result;
 }
-// ---------- التحقق من صلاحية الوصول للمحادثة ----------
+
+// ---------- صلاحيات المحادثات والمرفقات ----------
 async function canAccessChat(tables, workspaceId, taskId, userId) {
   const memberships = await tables.listRows({
-    databaseId: DATABASE_ID,
-    tableId: MEMBERS_ID,
-    queries: [
-      Query.equal("workspaceId", workspaceId),
-      Query.equal("userId", userId),
-      Query.limit(1)
-    ]
+    databaseId: DATABASE_ID, tableId: MEMBERS_ID,
+    queries: [Query.equal("workspaceId", workspaceId), Query.equal("userId", userId), Query.limit(1)]
   });
-
-  if (memberships.rows.length === 0) return false;
-
-  // المحادثة العامة متاحة لجميع أعضاء الغرفة
+  if (!memberships.rows.length) return false;
   if (!taskId) return true;
-
-  // التأكد من أن المهمة تتبع الغرفة نفسها
   let task;
-
   try {
-    task = await tables.getRow({
-      databaseId: DATABASE_ID,
-      tableId: TASKS_ID,
-      rowId: taskId
-    });
-  } catch (_) {
-    return false;
-  }
-
+    task = await tables.getRow({databaseId:DATABASE_ID, tableId:TASKS_ID, rowId:taskId});
+  } catch (_) { return false; }
   if (task.workspaceId !== workspaceId) return false;
-
-  // المدير يستطيع الوصول لجميع محادثات المهام
   if (memberships.rows[0].role === "admin") return true;
-
-  // العضو يستطيع الوصول للمهمة المكلف بها فقط
   const assignments = await tables.listRows({
-    databaseId: DATABASE_ID,
-    tableId: TASK_ASSIGNEES_ID,
-    queries: [
-      Query.equal("taskId", taskId),
-      Query.equal("userId", userId),
-      Query.limit(1)
-    ]
+    databaseId:DATABASE_ID, tableId:TASK_ASSIGNEES_ID,
+    queries:[Query.equal("taskId",taskId),Query.equal("userId",userId),Query.limit(1)]
   });
-
   return assignments.rows.length > 0;
 }
-// ---------- التحقق من نوع المرفق ----------
 function getAttachmentType(buffer, filename) {
   const ext = String(filename || "").split(".").pop().toLowerCase();
-  const hex = buffer.subarray(0, 12).toString("hex");
-  const header = buffer.subarray(0, 12).toString("ascii");
-
-  if (
-    ext === "pdf" &&
-    header.startsWith("%PDF-")
-  ) return "pdf";
-
-  if (
-    ["jpg", "jpeg"].includes(ext) &&
-    hex.startsWith("ffd8ff")
-  ) return "image";
-
-  if (
-    ext === "png" &&
-    hex.startsWith("89504e470d0a1a0a")
-  ) return "image";
-
-  if (
-    ext === "gif" &&
-    (header.startsWith("GIF87a") || header.startsWith("GIF89a"))
-  ) return "image";
-
-  if (
-    ext === "webp" &&
-    header.startsWith("RIFF") &&
-    header.slice(8, 12) === "WEBP"
-  ) return "image";
-
+  const hex = buffer.subarray(0,12).toString("hex");
+  const header = buffer.subarray(0,12).toString("ascii");
+  if (ext === "pdf" && header.startsWith("%PDF-")) return "pdf";
+  if (["jpg","jpeg"].includes(ext) && hex.startsWith("ffd8ff")) return "image";
+  if (ext === "png" && hex.startsWith("89504e470d0a1a0a")) return "image";
+  if (ext === "gif" && (header.startsWith("GIF87a") || header.startsWith("GIF89a"))) return "image";
+  if (ext === "webp" && header.startsWith("RIFF") && header.slice(8,12) === "WEBP") return "image";
   return null;
+}
+// في المهام القديمة نرث الحالة العامة إذا لم تكن حالة العضو مسجلة.
+function assignmentStatus(row, oldTaskStatus) {
+  return ["todo", "doing", "done"].includes(row.status)
+    ? row.status : (["todo","doing","done"].includes(oldTaskStatus) ? oldTaskStatus : "todo");
+}
+function taskOverallStatus(rows, oldTaskStatus) {
+  if (!rows.length) return oldTaskStatus || "todo";
+  const statuses = rows.map(r => assignmentStatus(r, oldTaskStatus));
+  if (statuses.every(s => s === "done")) return "done";
+  if (statuses.some(s => s === "doing" || s === "done")) return "doing";
+  return "todo";
 }
 export default async ({ req, res, error }) => {
   try {
@@ -161,7 +113,8 @@ export default async ({ req, res, error }) => {
       .setKey(serverKey);
 
     const tables = new TablesDB(serverClient);
-const storage = new Storage(serverClient);
+    const storage = new Storage(serverClient);
+
     const body = req.bodyJson;
 if (body?.action === "listWorkspaces") {
   const memberships = await tables.listRows({
@@ -325,19 +278,21 @@ if (body?.action === "listWorkspaces") {
     assignees = result.rows;
   }
 
-  const tasks = taskRows.rows.map(task => ({
-    id: task.$id,
-    spaceId: task.workspaceId,
-    title: task.title,
-    details: task.description || "",
-    reward: task.reward || "",
-    dueAt: task.dueAt || null,
-    status: task.status,
-    createdBy: task.createdBy,
-    assignees: assignees
-      .filter(a => a.taskId === task.$id)
-      .map(a => a.userId)
-  }));
+  const tasks = taskRows.rows.map(task => {
+    const assigned = assignees.filter(a=>a.taskId===task.$id);
+    const assigneeStatuses = Object.fromEntries(assigned.map(a=>[
+      a.userId, assignmentStatus(a,task.status)
+    ]));
+    return {
+      id:task.$id, spaceId:task.workspaceId, title:task.title,
+      details:task.description||"", reward:task.reward||"",
+      dueAt:task.dueAt||null,
+      status:taskOverallStatus(assigned,task.status),
+      createdBy:task.createdBy,
+      assignees:assigned.map(a=>a.userId),
+      assigneeStatuses
+    };
+  });
 
   return res.json({
     success: true,
@@ -345,174 +300,79 @@ if (body?.action === "listWorkspaces") {
   });
 }
     // ---------- عرض رسائل الغرفة أو المهمة ----------
-    // ---------- رفع مرفق وإرساله في المحادثة ----------
-if (body?.action === "uploadAttachment") {
-  const workspaceId = String(body.workspaceId || "").trim();
-  const taskId = String(body.taskId || "").trim();
-
-  const filename = String(body.fileName || "")
-    .replace(/[\\/\x00-\x1f\x7f]/g, "_")
-    .trim()
-    .slice(0, 120);
-
-  const base64 = String(body.fileBase64 || "");
-const caption = String(body.caption || "").trim().slice(0, 2000);
-  // الحد المبدئي: 2 ميجابايت للملف الواحد
-  if (
-    !workspaceId ||
-    !filename ||
-    !base64 ||
-    base64.length > 2800000
-  ) {
-    return res.json({
-      success: false,
-      message: "بيانات الملف غير صحيحة أو حجمه كبير"
-    }, 400);
-  }
-
-  // التأكد من صلاحية المستخدم قبل رفع الملف
-  const allowed = await canAccessChat(
-    tables, workspaceId, taskId, user.$id
-  );
-
-  if (!allowed) {
-    return res.json({
-      success: false,
-      message: "ليس لديك صلاحية لإرسال مرفقات هنا"
-    }, 403);
-  }
-
-  const buffer = Buffer.from(base64, "base64");
-
-  if (!buffer.length || buffer.length > 2 * 1024 * 1024) {
-    return res.json({
-      success: false,
-      message: "الحد الأقصى للملف 2 ميجابايت"
-    }, 400);
-  }
-
-  const fileType = getAttachmentType(buffer, filename);
-
-  if (!fileType) {
-    return res.json({
-      success: false,
-      message: "يُسمح بالصور وملفات PDF فقط"
-    }, 400);
-  }
-
-  // حفظ الملف دون صلاحيات قراءة عامة
-  const uploaded = await storage.createFile({
-    bucketId: ATTACHMENTS_BUCKET_ID,
-    fileId: ID.unique(),
-    file: InputFile.fromBuffer(buffer, filename),
-    permissions: []
-  });
-
-  let created;
-
-  try {
-    created = await tables.createRow({
-      databaseId: DATABASE_ID,
-      tableId: MESSAGES_ID,
-      rowId: ID.unique(),
-      data: {
-        workspaceId,
-        senderId: user.$id,
-        content: filename,
-        caption: caption,
-        messageType: fileType,
-        attachmentId: uploaded.$id,
-        ...(taskId ? { taskId } : {})
-      },
-      permissions: []
-    });
-  } catch (err) {
-    await storage.deleteFile({
-      bucketId: ATTACHMENTS_BUCKET_ID,
-      fileId: uploaded.$id
-    }).catch(() => {});
-    throw err;
-  }
-
-  return res.json({
-    success: true,
-    message: "تم إرسال المرفق بنجاح",
-    messageData: {
-      id: created.$id,
-      attachmentId: uploaded.$id,
-      messageType: fileType
+    // ---------- إرسال صورة / PDF مع تعليق ----------
+    if (body?.action === "uploadAttachment") {
+      const workspaceId = String(body.workspaceId || "").trim();
+      const taskId = String(body.taskId || "").trim();
+      const filename = String(body.fileName || "").replace(/[\\/\x00-\x1f\x7f]/g, "_").trim().slice(0,120);
+      const base64 = String(body.fileBase64 || "");
+      const caption = String(body.caption || "").trim();
+      if (!workspaceId || !filename || !base64 || base64.length > 2800000 || caption.length > 2000) {
+        return res.json({success:false,message:"بيانات الملف غير صحيحة أو حجمه كبير"},400);
+      }
+      if (!(await canAccessChat(tables,workspaceId,taskId,user.$id))) {
+        return res.json({success:false,message:"ليس لديك صلاحية لإرسال مرفقات هنا"},403);
+      }
+      // لا تقبل base64 غير صحيح أو الملفات التي تزيد عن 2 ميجابايت.
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+        return res.json({success:false,message:"ترميز الملف غير صحيح"},400);
+      }
+      const buffer = Buffer.from(base64,"base64");
+      if (!buffer.length || buffer.length > 2*1024*1024) {
+        return res.json({success:false,message:"الحد الأقصى للملف 2 ميجابايت"},400);
+      }
+      const fileType = getAttachmentType(buffer,filename);
+      if (!fileType) return res.json({success:false,message:"يُسمح بالصور وملفات PDF فقط"},400);
+      const uploaded = await storage.createFile({
+        bucketId: ATTACHMENTS_BUCKET_ID, fileId: ID.unique(),
+        file: InputFile.fromBuffer(buffer,filename), permissions:[]
+      });
+      let created;
+      try {
+        created = await tables.createRow({
+          databaseId:DATABASE_ID, tableId:MESSAGES_ID, rowId:ID.unique(),
+          data: {
+            workspaceId, senderId:user.$id, content:filename,
+            caption, messageType:fileType, attachmentId:uploaded.$id,
+            ...(taskId?{taskId}:{})
+          },permissions:[]
+        });
+      } catch(err) {
+        await storage.deleteFile({bucketId:ATTACHMENTS_BUCKET_ID,fileId:uploaded.$id}).catch(()=>{});
+        throw err;
+      }
+      return res.json({success:true,message:"تم إرسال المرفق بنجاح",messageData:{
+        id:created.$id,attachmentId:uploaded.$id,messageType:fileType
+      }});
     }
-  });
-}
-    // ---------- عرض وتنزيل مرفقات المحادثة ----------
-if (body?.action === "getAttachment") {
-  const workspaceId = String(body.workspaceId || "").trim();
-  const taskId = String(body.taskId || "").trim();
-  const messageId = String(body.messageId || "").trim();
+    // ---------- قراءة مرفق بعد التحقق من صاحب الطلب والمحادثة ----------
+    if (body?.action === "getAttachment") {
+      const workspaceId=String(body.workspaceId||"").trim();
+      const taskId=String(body.taskId||"").trim();
+      const messageId=String(body.messageId||"").trim();
+      if (!workspaceId || !messageId) {
+        return res.json({success:false,message:"بيانات المرفق غير مكتملة"},400);
+      }
+      if (!(await canAccessChat(tables,workspaceId,taskId,user.$id))) {
+        return res.json({success:false,message:"ليس لديك صلاحية لعرض هذا المرفق"},403);
+      }
+      let message;
+      try {
+        message = await tables.getRow({databaseId:DATABASE_ID,tableId:MESSAGES_ID,rowId:messageId});
+      } catch (_) { return res.json({success:false,message:"المرفق غير موجود"},404); }
+      if (message.workspaceId !== workspaceId || (message.taskId||"") !== taskId ||
+          !message.attachmentId || !["image","pdf"].includes(message.messageType)) {
+        return res.json({success:false,message:"ليس لديك صلاحية لعرض هذا المرفق"},403);
+      }
+      const data = await storage.getFileDownload({
+        bucketId:ATTACHMENTS_BUCKET_ID,fileId:message.attachmentId
+      });
+      return res.json({
+        success:true,fileName:message.content,messageType:message.messageType,
+        fileBase64:Buffer.from(data).toString("base64")
+      });
+    }
 
-  if (!workspaceId || !messageId) {
-    return res.json({
-      success: false,
-      message: "بيانات المرفق غير مكتملة"
-    }, 400);
-  }
-
-  // التحقق من صلاحية المستخدم
-  const allowed = await canAccessChat(
-    tables, workspaceId, taskId, user.$id
-  );
-
-  if (!allowed) {
-    return res.json({
-      success: false,
-      message: "ليس لديك صلاحية لعرض هذا المرفق"
-    }, 403);
-  }
-
-  // جلب الرسالة المرتبطة بالمرفق
-  let message;
-
-  try {
-    message = await tables.getRow({
-      databaseId: DATABASE_ID,
-      tableId: MESSAGES_ID,
-      rowId: messageId
-    });
-  } catch (_) {
-    return res.json({
-      success: false,
-      message: "المرفق غير موجود"
-    }, 404);
-  }
-
-  // التأكد أن المرفق ينتمي للمحادثة المطلوبة
-  if (
-    message.workspaceId !== workspaceId ||
-    (message.taskId || "") !== taskId ||
-    !message.attachmentId ||
-    !["image", "pdf"].includes(message.messageType)
-  ) {
-    return res.json({
-      success: false,
-      message: "ليس لديك صلاحية لعرض هذا المرفق"
-    }, 403);
-  }
-
-  // تنزيل الملف من التخزين الخاص
-  const fileBytes = await storage.getFileDownload({
-    bucketId: ATTACHMENTS_BUCKET_ID,
-    fileId: message.attachmentId
-  });
-
-  const fileBuffer = Buffer.from(fileBytes);
-
-  return res.json({
-    success: true,
-    fileName: message.content,
-    messageType: message.messageType,
-    fileBase64: fileBuffer.toString("base64")
-  });
-}
     if (body?.action === "listMessages") {
       const workspaceId = typeof body.workspaceId === "string"
         ? body.workspaceId.trim()
@@ -862,85 +722,68 @@ if (body?.action === "getAttachment") {
         taskId: taskId
       });
     }
+    // ---------- حالة مستقلة لكل عضو مكلف ----------
     if (body?.action === "updateTask") {
-      const taskId = typeof body.taskId === "string"
-        ? body.taskId.trim()
-        : "";
-
+      const taskId = typeof body.taskId === "string" ? body.taskId.trim() : "";
       const status = body.status;
-
-      if (!taskId || !["todo", "doing", "done"].includes(status)) {
-        return res.json({
-          success: false,
-          message: "بيانات تحديث المهمة غير صحيحة"
-        }, 400);
+      if (!taskId || !["todo","doing","done"].includes(status)) {
+        return res.json({success:false,message:"بيانات تحديث المهمة غير صحيحة"},400);
       }
-
-      const task = await tables.getRow({
-        databaseId: DATABASE_ID,
-        tableId: TASKS_ID,
-        rowId: taskId
-      });
-
-      // التأكد أن المستخدم عضو في الغرفة
+      const task = await tables.getRow({databaseId:DATABASE_ID,tableId:TASKS_ID,rowId:taskId});
       const memberships = await tables.listRows({
-        databaseId: DATABASE_ID,
-        tableId: MEMBERS_ID,
-        queries: [
-          Query.equal("workspaceId", task.workspaceId),
-          Query.equal("userId", user.$id),
-          Query.limit(1)
-        ]
+        databaseId:DATABASE_ID,tableId:MEMBERS_ID,
+        queries:[Query.equal("workspaceId",task.workspaceId),Query.equal("userId",user.$id),Query.limit(1)]
       });
-
       if (!memberships.rows.length) {
-        return res.json({
-          success: false,
-          message: "ليس لديك صلاحية لتحديث هذه المهمة"
-        }, 403);
+        return res.json({success:false,message:"ليس لديك صلاحية لتحديث هذه المهمة"},403);
       }
-
-      const isAdmin = memberships.rows[0].role === "admin";
-
-      // العضو العادي يعدل المهام المعيّنة له فقط
-      if (!isAdmin) {
-        const assignments = await tables.listRows({
-          databaseId: DATABASE_ID,
-          tableId: TASK_ASSIGNEES_ID,
-          queries: [
-            Query.equal("taskId", taskId),
-            Query.equal("userId", user.$id),
-            Query.limit(1)
-          ]
-        });
-
-        if (!assignments.rows.length) {
-          return res.json({
-            success: false,
-            message: "هذه المهمة ليست معيّنة لك"
-          }, 403);
+      const assignments = await tables.listRows({
+        databaseId:DATABASE_ID,tableId:TASK_ASSIGNEES_ID,
+        queries:[Query.equal("taskId",taskId),Query.limit(100)]
+      });
+      const myAssignment=assignments.rows.find(a=>a.userId===user.$id);
+      // المدير غير المكلّف يستطيع فقط التحكم بحالة المهمة الخالية من المكلفين.
+      if (!myAssignment) {
+        if (memberships.rows[0].role === "admin" && assignments.rows.length === 0) {
+          const updated=await tables.updateRow({
+            databaseId:DATABASE_ID,tableId:TASKS_ID,rowId:taskId,data:{status}
+          });
+          return res.json({success:true,task:{id:taskId,spaceId:task.workspaceId,status:updated.status,assigneeStatuses:{}}});
+        }
+        return res.json({success:false,message:"يحق للمكلّف فقط تعديل حالة إنجازه"},403);
+      }
+      // ثبّت حالة المهام القديمة للمكلّفين قبل تغيير الحالة العامة.
+      for (const oldRow of assignments.rows) {
+        if (!["todo","doing","done"].includes(oldRow.status)) {
+          oldRow.status = assignmentStatus(oldRow,task.status);
+          await tables.updateRow({
+            databaseId:DATABASE_ID,tableId:TASK_ASSIGNEES_ID,
+            rowId:oldRow.$id,data:{status:oldRow.status}
+          });
         }
       }
-
-      // حفظ الحالة الجديدة في قاعدة البيانات
-      const updatedTask = await tables.updateRow({
-        databaseId: DATABASE_ID,
-        tableId: TASKS_ID,
-        rowId: taskId,
-        data: {
-          status: status
-        }
+      // تعديل حالة العضو الحالي فقط دون المساس بزملائه.
+      const updatedAssignment=await tables.updateRow({
+        databaseId:DATABASE_ID, tableId:TASK_ASSIGNEES_ID,
+        rowId:myAssignment.$id, data:{status}
       });
-
-      return res.json({
-        success: true,
-        message: "تم تحديث حالة المهمة",
-        task: {
-          id: updatedTask.$id,
-          spaceId: updatedTask.workspaceId,
-          status: updatedTask.status
-        }
+      // أعد قراءة التعيينات لتقليل خطر نتائج قديمة عند تعديل عضوين بالتقارب.
+      const updatedAssignmentsResult=await tables.listRows({
+        databaseId:DATABASE_ID,tableId:TASK_ASSIGNEES_ID,
+        queries:[Query.equal("taskId",taskId),Query.limit(100)]
       });
+      const updatedAssignments=updatedAssignmentsResult.rows;
+      const aggregate=taskOverallStatus(updatedAssignments,task.status);
+      // مزامنة الحالة العامة لعرضها في التقارير وعند العملاء الأقدم.
+      await tables.updateRow({
+        databaseId:DATABASE_ID,tableId:TASKS_ID,rowId:taskId,data:{status:aggregate}
+      });
+      return res.json({success:true,message:"تم تحديث إنجازك بشكل مستقل",task:{
+        id:taskId,spaceId:task.workspaceId,status:aggregate,
+        assigneeStatuses:Object.fromEntries(updatedAssignments.map(a=>[
+          a.userId,assignmentStatus(a,task.status)
+        ]))
+      }});
     }
         if (body?.action === "createTask") {
   const workspaceId = typeof body.workspaceId === "string"
@@ -1058,7 +901,8 @@ if (dueAt && Number.isNaN(dueAt.getTime())) {
         rowId: ID.unique(),
         data: {
           taskId: task.$id,
-          userId
+          userId,
+          status: "todo"
         },
         permissions: []
       });
@@ -1098,6 +942,7 @@ if (dueAt && Number.isNaN(dueAt.getTime())) {
       reward,
       status: "todo",
       assignees,
+      assigneeStatuses: Object.fromEntries(assignees.map(id=>[id,"todo"])),
       dueAt: dueAt ? dueAt.toISOString() : null,
       completedBy: null
     }
