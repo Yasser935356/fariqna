@@ -828,7 +828,75 @@ function enterApp() {
     });
     $('spaces-empty').classList.toggle('hidden', mine.length > 0);
   }
+  // ---------- إعدادات المساحة ----------
+  $('edit-space-btn').addEventListener('click', function () {
+    var space = db.spaces.find(function (s) {
+      return s.id === state.spaceId;
+    });
 
+    if (!space || !me() || space.adminId !== me().id) {
+      toast('مالك المساحة فقط يستطيع تعديلها');
+      return;
+    }
+
+    openModal(
+      '⚙️ إعدادات المساحة',
+      '<label>اسم المساحة<input name="name" required maxlength="40" value="' +
+      esc(space.name || '') + '"></label>' +
+      '<label>وصف المساحة<input name="desc" maxlength="120" value="' +
+      esc(space.desc || '') + '"></label>',
+      async function (fd) {
+        var name = String(fd.get('name') || '').trim();
+        var desc = String(fd.get('desc') || '').trim();
+
+        if (!name) {
+          toast('يجب كتابة اسم المساحة');
+          return;
+        }
+
+        var btn = $('modal-form').querySelector('[type="submit"]');
+        if (btn.disabled) return;
+        btn.disabled = true;
+
+        try {
+          var functions = new Appwrite.Functions(window.fariqna.client);
+
+          var execution = await functions.createExecution({
+            functionId: "6aef48cf0019c49d0ddd",
+            body: JSON.stringify({
+              action: "updateWorkspace",
+              workspaceId: space.id,
+              name: name,
+              desc: desc
+            }),
+            async: false,
+            headers: { "content-type": "application/json" }
+          });
+
+          var result = JSON.parse(execution.responseBody || '{}');
+
+          if (!result.success) {
+            throw new Error(result.message || 'تعذر تعديل المساحة');
+          }
+
+          space.name = name;
+          space.desc = desc;
+
+          save(db);
+          closeModal();
+          renderSpace();
+          renderSpaces();
+
+          toast('تم تعديل المساحة بنجاح');
+
+        } catch (err) {
+          toast('تعذر التعديل: ' + err.message);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+    );
+  });
   $('new-space-btn').addEventListener('click', function () {
     openModal('مساحة جديدة', '<label>اسم المساحة<input name="name" required maxlength="40"></label>' +
       '<label>وصف مختصر<input name="desc" maxlength="120"></label>', function (fd) {
