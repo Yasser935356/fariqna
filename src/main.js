@@ -152,6 +152,61 @@ if (body?.action === "listWorkspaces") {
     workspaces
   });
 }
+        // ---------- تعديل معلومات المساحة ----------
+    if (body?.action === "updateWorkspace") {
+      const workspaceId = String(body.workspaceId || "").trim();
+      const name = String(body.name || "").trim();
+      const desc = String(body.desc || "").trim();
+
+      if (!workspaceId || !name || name.length > 40 || desc.length > 120) {
+        return res.json({
+          success: false,
+          message: "تحقق من اسم المساحة ووصفها"
+        }, 400);
+      }
+
+      let workspace;
+
+      try {
+        workspace = await tables.getRow({
+          databaseId: DATABASE_ID,
+          tableId: WORKSPACES_ID,
+          rowId: workspaceId
+        });
+      } catch (_) {
+        return res.json({
+          success: false,
+          message: "المساحة غير موجودة"
+        }, 404);
+      }
+
+      if (workspace.ownerId !== user.$id) {
+        return res.json({
+          success: false,
+          message: "مالك المساحة فقط يستطيع تعديلها"
+        }, 403);
+      }
+
+      const updated = await tables.updateRow({
+        databaseId: DATABASE_ID,
+        tableId: WORKSPACES_ID,
+        rowId: workspaceId,
+        data: {
+          name,
+          desc
+        }
+      });
+
+      return res.json({
+        success: true,
+        message: "تم تعديل المساحة بنجاح",
+        workspace: {
+          id: updated.$id,
+          name: updated.name,
+          desc: updated.desc
+        }
+      });
+    }
     if (body?.action === "joinWorkspace") {
   const inviteCode = typeof body.code === "string"
     ? body.code.trim().toUpperCase()
