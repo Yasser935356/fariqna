@@ -1,6 +1,10 @@
 
 
 
+
+
+
+
 import { Client, Account, TablesDB, ID, Query, Users, Storage } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { randomInt } from "node:crypto";
@@ -152,6 +156,153 @@ if (body?.action === "listWorkspaces") {
     workspaces
   });
 }
+    // ---------- حذف المساحة وما يتبعها (للمالك فقط) ----------
+    // لا تستدعِ هذا الإجراء إلا بعد تأكيد صريح من المستخدم في الواجهة.
+    if (body?.action === "deleteWorkspace") {
+      const workspaceId = typeof body.workspaceId === "string"
+        ? body.workspaceId.trim() : "";
+      const confirmName = typeof body.confirmName === "string"
+        ? body.confirmName.trim() : "";
+
+      if (!workspaceId || !confirmName) {
+        return res.json({
+          success: false,
+          message: "معرف المساحة واسمها للتأكيد مطلوبان"
+        }, 400);
+      }
+
+      let workspace;
+      try {
+        workspace = await tables.getRow({
+          databaseId: DATABASE_ID,
+          tableId: WORKSPACES_ID,
+          rowId: workspaceId
+        });
+      } catch (err) {
+        if (Number(err?.code) !== 404) throw err;
+        return res.json({ success: false, message: "المساحة غير موجودة" }, 404);
+      }
+
+      // لا نعتمد على role المرسَل من المتصفح؛ المالك الحقيقي محفوظ في قاعدة البيانات.
+      if (workspace.ownerId !== user.$id) {
+        return res.json({
+          success: false,
+          message: "مالك المساحة فقط يستطيع حذفها"
+        }, 403);
+      }
+
+      // يجب أن يكتب المالك اسم المساحة حرفيًا قبل حذفها نهائيًا.
+      if (confirmName !== String(workspace.name || "").trim()) {
+        return res.json({
+          success: false,
+          message: "اسم المساحة الذي كتبته لا يطابق اسمها الحالي"
+        }, 400);
+      }
+
+      const removed = { messages: 0, attachments: 0, assignments: 0, tasks: 0, members: 0 };
+
+      // نقرأ أول دفعة دائمًا لأننا نحذف الصفوف أثناء المرور عليها؛
+      // بذلك لا نتخطى صفوفًا لو كان العدد أكثر من 100.
+      // حذف جميع رسائل المساحة (العامة ورسائل المهام) مع مرفقاتها.
+      while (true) {
+        const batch = await tables.listRows({
+          databaseId: DATABASE_ID,
+          tableId: MESSAGES_ID,
+          queries: [Query.equal("workspaceId", workspaceId), Query.limit(100)]
+        });
+        if (!batch.rows.length) break;
+
+        for (const message of batch.rows) {
+          if (message.attachmentId) {
+            try {
+              await storage.deleteFile({
+                bucketId: ATTACHMENTS_BUCKET_ID,
+                fileId: message.attachmentId
+              });
+              removed.attachments += 1;
+            } catch (err) {
+              // قد يكون الملف حُذف بالفعل في محاولة سابقة.
+              if (Number(err?.code) !== 404) throw err;
+            }
+          }
+          await tables.deleteRow({
+            databaseId: DATABASE_ID,
+            tableId: MESSAGES_ID,
+            rowId: message.$id
+          });
+          removed.messages += 1;
+        }
+      }
+
+      // حذف تعيينات كل مهمة أولًا ثم المهمة نفسها.
+      while (true) {
+        const tasksBatch = await tables.listRows({
+          databaseId: DATABASE_ID,
+          tableId: TASKS_ID,
+          queries: [Query.equal("workspaceId", workspaceId), Query.limit(100)]
+        });
+        if (!tasksBatch.rows.length) break;
+
+        for (const task of tasksBatch.rows) {
+          while (true) {
+            const assignmentBatch = await tables.listRows({
+              databaseId: DATABASE_ID,
+              tableId: TASK_ASSIGNEES_ID,
+              queries: [Query.equal("taskId", task.$id), Query.limit(100)]
+            });
+            if (!assignmentBatch.rows.length) break;
+            for (const assignment of assignmentBatch.rows) {
+              await tables.deleteRow({
+                databaseId: DATABASE_ID,
+                tableId: TASK_ASSIGNEES_ID,
+                rowId: assignment.$id
+              });
+              removed.assignments += 1;
+            }
+          }
+
+          await tables.deleteRow({
+            databaseId: DATABASE_ID,
+            tableId: TASKS_ID,
+            rowId: task.$id
+          });
+          removed.tasks += 1;
+        }
+      }
+
+      // ثم حذف جميع عضويات المساحة قبل حذف سجل المساحة نفسه.
+      while (true) {
+        const membersBatch = await tables.listRows({
+          databaseId: DATABASE_ID,
+          tableId: MEMBERS_ID,
+          queries: [Query.equal("workspaceId", workspaceId), Query.limit(100)]
+        });
+        if (!membersBatch.rows.length) break;
+        for (const member of membersBatch.rows) {
+          await tables.deleteRow({
+            databaseId: DATABASE_ID,
+            tableId: MEMBERS_ID,
+            rowId: member.$id
+          });
+          removed.members += 1;
+        }
+      }
+
+      // آخر خطوة: حذف المساحة نفسها. أي فشل سابق يمنع الوصول لهذه الخطوة.
+      await tables.deleteRow({
+        databaseId: DATABASE_ID,
+        tableId: WORKSPACES_ID,
+        rowId: workspaceId
+      });
+
+      return res.json({
+        success: true,
+        message: "تم حذف المساحة ومحتوياتها بنجاح",
+        workspaceId,
+        removed
+      });
+    }
+
         // ---------- تعديل معلومات المساحة ----------
     if (body?.action === "updateWorkspace") {
       const workspaceId = String(body.workspaceId || "").trim();
