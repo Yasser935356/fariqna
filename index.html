@@ -3,15 +3,6 @@
 
 
 
-
-
-
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -329,15 +320,18 @@ textarea { resize: vertical; }
   <script src="https://cdn.jsdelivr.net/npm/appwrite@29.0.0"></script>
 <script>
   const client = new Appwrite.Client();
+  // حماية أثناء التطوير: لا يسمح بحذف مساحات مشروع العائلة الفعلي من هذه الواجهة.
+  const APPWRITE_PROJECT_ID = "6aef1d79003afe64d4e5";
 
   client
     .setEndpoint("https://fra.cloud.appwrite.io/v1")
-    .setProject("6aef1d79003afe64d4e5");
+    .setProject(APPWRITE_PROJECT_ID);
 
   window.fariqna = {
     client,
     account: new Appwrite.Account(client),
-    ID: Appwrite.ID
+    ID: Appwrite.ID,
+    projectId: APPWRITE_PROJECT_ID
   };
 </script>
 </head>
@@ -432,6 +426,7 @@ textarea { resize: vertical; }
         <button class="btn ghost" id="show-achievements" type="button">📊 إنجاز الأعضاء</button>
         <button class="btn ghost" id="show-ranking" type="button">🏅 ترتيب الأعضاء</button>
        <button class="btn ghost" id="edit-space-btn" type="button">⚙️ إعدادات المساحة</button>
+       <button class="btn danger" id="delete-space-btn" type="button">🗑️ حذف المساحة</button>
       </div>
       <div class="invite-box" id="invite-box">
         <span class="muted">رمز الدعوة</span>
@@ -764,6 +759,15 @@ function enterApp() {
       throw new Error(result.message || "فشل استرجاع الغرف");
     }
 
+    // منع ظهور المساحات المحذوفة من جهاز آخر بسبب بيانات المتصفح القديمة.
+    // الخادم قد يرجع 100 نتيجة فقط؛ نعيد المصالحة عند اكتمال القائمة فقط.
+    if (result.workspaces.length < 100) {
+      var currentSpaceIds = new Set(result.workspaces.map(function (space) { return space.id; }));
+      db.members = db.members.filter(function (membership) {
+        return membership.userId !== u.id || currentSpaceIds.has(membership.spaceId);
+      });
+    }
+
     result.workspaces.forEach(function (space) {
       var existing = db.spaces.find(function (s) {
         return s.id === space.id;
@@ -897,6 +901,83 @@ function enterApp() {
       }
     );
   });
+  // ---------- حذف المساحة بجميع محتوياتها (للمالك فقط) ----------
+  // لا يجوز تفعيل هذا الإجراء على مشروع العائلة الحقيقي أثناء التطوير.
+  $('delete-space-btn').addEventListener('click', function () {
+    var space = db.spaces.find(function (item) { return item.id === state.spaceId; });
+    var user = me();
+    var membership = myMembership(state.spaceId);
+    if (!space || !user || !membership || membership.role !== 'admin' || space.adminId !== user.id) {
+      toast('مالك المساحة فقط يستطيع حذفها');
+      return;
+    }
+
+    openModal(
+      '🗑️ حذف المساحة نهائيًا',
+      '<p class="error" style="font-weight:700">تحذير: سيُحذف جميع أعضاء المساحة ومهامها ومحادثاتها ومرفقاتها، ولا يمكن التراجع عن الحذف.</p>' +
+      '<p>للتأكيد اكتب اسم المساحة تمامًا: <strong>' + esc(space.name) + '</strong></p>' +
+      '<label>اسم المساحة للتأكيد<input name="confirmName" type="text" maxlength="40" autocomplete="off" required placeholder="اكتب اسم المساحة هنا"></label>',
+      async function (fd) {
+        var confirmName = String(fd.get('confirmName') || '').trim();
+        if (confirmName !== String(space.name || '').trim()) {
+          toast('الاسم الذي كتبته لا يطابق اسم المساحة');
+          return;
+        }
+
+        // مؤشر حماية إضافي في الواجهة، ولا يغني عن فحص المالك في الخلفية.
+        // المشروع التجريبي يحتاج وظيفة منفصلة وجداول وهمية قبل رفع هذا الحظر.
+        if (window.fariqna.projectId === '6aef1d79003afe64d4e5') {
+          toast('الحذف معطّل لحماية بيانات العائلة. يجب ربط مشروع Appwrite تجريبي أولًا.');
+          return;
+        }
+
+        var submitButton = $('modal-form').querySelector('[type="submit"]');
+        if (submitButton.disabled) return;
+        submitButton.disabled = true;
+        try {
+          var functions = new Appwrite.Functions(window.fariqna.client);
+          var execution = await functions.createExecution({
+            // وظيفة إدارة المساحات على بيئة الاختبار، بعد إعدادها ونشرها هناك.
+            functionId: '6af8b45e000da1d574c3',
+            body: JSON.stringify({
+              action: 'deleteWorkspace',
+              workspaceId: space.id,
+              confirmName: confirmName
+            }),
+            async: false,
+            headers: { 'content-type': 'application/json' }
+          });
+          var result = JSON.parse(execution.responseBody || '{}');
+          if (!result.success || result.workspaceId !== space.id) {
+            throw new Error(result.message || 'تعذر حذف المساحة');
+          }
+
+          // لا نحذف بيانات العرض محليًا إلا بعد تأكيد نجاح الخلفية.
+          db.spaces = db.spaces.filter(function (item) { return item.id !== space.id; });
+          db.members = db.members.filter(function (item) { return item.spaceId !== space.id; });
+          db.tasks = db.tasks.filter(function (item) { return item.spaceId !== space.id; });
+          if (db.syncedTaskIds) delete db.syncedTaskIds[space.id];
+          save(db);
+          closeModal();
+          state.spaceId = null;
+          state.taskChatId = null;
+          renderSpaces();
+          show('spaces');
+          toast('تم حذف المساحة ومحتوياتها بنجاح');
+        } catch (err) {
+          toast('تعذر حذف المساحة: ' + (err.message || 'حدث خطأ'));
+        } finally {
+          submitButton.disabled = false;
+        }
+      }
+    );
+    // نميّز زر التأكيد باللون الأحمر لتفادي الضغط غير المقصود.
+    var submitButton = $('modal-form').querySelector('[type="submit"]');
+    submitButton.textContent = 'حذف المساحة نهائيًا';
+    submitButton.classList.remove('primary');
+    submitButton.classList.add('danger');
+  });
+
   $('new-space-btn').addEventListener('click', function () {
     openModal('مساحة جديدة', '<label>اسم المساحة<input name="name" required maxlength="40"></label>' +
       '<label>وصف مختصر<input name="desc" maxlength="120"></label>', function (fd) {
@@ -2091,6 +2172,10 @@ document.addEventListener('click', async function (e) {
 </style>
 </body>
 </html>
+
+
+
+
 
 
 
