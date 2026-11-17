@@ -460,7 +460,7 @@ textarea { resize: vertical; }
       <textarea name="message" rows="2" maxlength="2000"
                 placeholder="اكتب رسالة لأعضاء الغرفة..." ></textarea>
     </label>
-<label>📎 إرفاق صورة أو ملف PDF
+<label>📎 إرفاق صورة (حتى 20MB) أو PDF (حتى 50MB)
   <input
     type="file"
     name="attachment"
@@ -547,7 +547,7 @@ textarea { resize: vertical; }
         <textarea name="message" rows="2" maxlength="2000"
                   placeholder="اكتب رسالة عن هذه المهمة..." ></textarea>
       </label>
-<label>📎 إرفاق صورة أو ملف PDF
+<label>📎 إرفاق صورة (حتى 20MB) أو PDF (حتى 50MB)
   <input
     type="file"
     name="attachment"
@@ -1618,87 +1618,95 @@ dueAt: dueAt
   });
 // ---------- إرسال رسائل المحادثة العامة ----------
  // ---------- قراءة المرفقات ----------
-function readFileAsBase64(file) {
-  return new Promise(function (resolve, reject) {
-    var reader = new FileReader();
-
-    reader.onload = function () {
-      var result = String(reader.result || '');
-      resolve(result.split(',')[1] || '');
-    };
-
-    reader.onerror = function () {
-      reject(new Error('تعذرت قراءة الملف'));
-    };
-
-    reader.readAsDataURL(file);
-  });
-}
- // ---------- رفع مرفقات المحادثات ----------
- // ---------- استرجاع مرفقات المحادثات ----------
+// ---------- المرفقات الكبيرة: صور حتى 20MB وPDF حتى 50MB ----------
 async function fetchChatAttachment(messageId, workspaceId, taskId) {
   var functions = new Appwrite.Functions(window.fariqna.client);
-
   var execution = await functions.createExecution({
     functionId: "6aef48cf0019c49d0ddd",
     body: JSON.stringify({
-      action: "getAttachment",
+      action: "getAttachmentLink",
       messageId: messageId,
       workspaceId: workspaceId,
       taskId: taskId || ""
     }),
     async: false,
-    headers: {
-      "content-type": "application/json"
-    }
+    headers: { "content-type": "application/json" }
   });
-
   var result = JSON.parse(execution.responseBody || "{}");
-
-  if (!result.success || !result.fileBase64) {
+  if (execution.status === "failed" || execution.responseStatusCode >= 400 ||
+      !result.success || !result.fileUrl) {
     throw new Error(result.message || "تعذر فتح المرفق");
   }
-
+  var url = new URL(result.fileUrl);
+  if (url.origin !== "https://fra.cloud.appwrite.io" || url.protocol !== "https:") {
+    throw new Error("رابط المرفق غير موثوق");
+  }
   return result;
 }
+
 async function uploadChatAttachment(file, workspaceId, taskId, caption) {
-  var allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'];
-  var ext = file.name.split('.').pop().toLowerCase();
-
-  if (!allowed.includes(ext)) {
-    throw new Error('يُسمح بالصور وملفات PDF فقط');
+  var allowedMimeTypes = {
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+    gif: "image/gif", webp: "image/webp", pdf: "application/pdf"
+  };
+  var extension = String(file.name || "").split(".").pop().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(allowedMimeTypes, extension)) {
+    throw new Error("يُسمح بالصور وملفات PDF فقط");
   }
-
-  if (file.size > 2 * 1024 * 1024) {
-    throw new Error('الحد الأقصى للملف 2 ميجابايت');
+  var maxBytes = extension === "pdf" ? 50 * 1024 * 1024 : 20 * 1024 * 1024;
+  if (!file.size || file.size > maxBytes) {
+    throw new Error(extension === "pdf"
+      ? "الحد الأقصى لملفات PDF هو 50 ميجابايت"
+      : "الحد الأقصى للصور هو 20 ميجابايت");
   }
-
-  var fileBase64 = await readFileAsBase64(file);
-
+  if (file.type && file.type !== allowedMimeTypes[extension]) {
+    throw new Error("نوع الملف لا يطابق امتداده");
+  }
+  if (String(caption || "").length > 2000) {
+    throw new Error("التعليق طويل جدًا");
+  }
+  if (!me()) throw new Error("سجّل الدخول أولًا");
+  // حماية بيانات العائلة خلال تطوير النسخة الثانية.
+  if (window.fariqna.projectId === "6aef1d79003afe64d4e5") {
+    throw new Error("الرفع الكبير معطّل حتى ربط مشروع Appwrite التجريبي");
+  }
+  // تحقق من الوصول إلى المحادثة قبل رفع الملف.
   var functions = new Appwrite.Functions(window.fariqna.client);
-
+  var check = await functions.createExecution({
+    functionId: "6aef48cf0019c49d0ddd",
+    body: JSON.stringify({
+      action: "listMessages", workspaceId: workspaceId, taskId: taskId || ""
+    }),
+    async: false,
+    headers: { "content-type": "application/json" }
+  });
+  var access = JSON.parse(check.responseBody || "{}");
+  if (check.status === "failed" || check.responseStatusCode >= 400 || !access.success) {
+    throw new Error(access.message || "ليس لديك صلاحية لرفع مرفق هنا");
+  }
+  var storage = new Appwrite.Storage(window.fariqna.client);
+  var uploaded = await storage.createFile({
+    bucketId: "6af40a8700134c679043",
+    fileId: window.fariqna.ID.unique(),
+    file: file,
+    permissions: [Appwrite.Permission.read(Appwrite.Role.user(me().id))]
+  });
   var execution = await functions.createExecution({
     functionId: "6aef48cf0019c49d0ddd",
     body: JSON.stringify({
-      action: "uploadAttachment",
+      action: "finalizeAttachmentUpload",
       workspaceId: workspaceId,
       taskId: taskId || "",
-      fileName: file.name,
-      fileBase64: fileBase64,
+      fileId: uploaded.$id,
       caption: caption || ""
     }),
     async: false,
-    headers: {
-      "content-type": "application/json"
-    }
+    headers: { "content-type": "application/json" }
   });
-
   var result = JSON.parse(execution.responseBody || "{}");
-
-  if (!result.success) {
-    throw new Error(result.message || 'تعذر رفع المرفق');
+  if (execution.status === "failed" || execution.responseStatusCode >= 400 || !result.success) {
+    throw new Error(result.message || "تعذر ربط المرفق بالمحادثة");
   }
-
   return result;
 }
 $('room-chat-form').addEventListener('submit', async function (e) {
@@ -2005,56 +2013,20 @@ await uploadChatAttachment(attachment, workspaceId, taskId, message);
 document.addEventListener('click', async function (e) {
   var btn = e.target.closest('[data-attachment-message]');
   if (!btn || btn.disabled) return;
-
   var preview = window.open('about:blank', '_blank');
-
   if (!preview) {
     toast('اسمح بفتح النوافذ المنبثقة لعرض المرفق');
     return;
   }
-
   preview.document.body.textContent = 'جارٍ تحميل المرفق...';
   btn.disabled = true;
-
   try {
     var result = await fetchChatAttachment(
       btn.dataset.attachmentMessage,
       btn.dataset.workspaceId,
       btn.dataset.taskId || ''
     );
-
-    var binary = atob(result.fileBase64);
-    var bytes = new Uint8Array(binary.length);
-
-    for (var i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-
-    var ext = String(result.fileName || '')
-      .split('.').pop().toLowerCase();
-
-    var types = {
-      jpg: 'image/jpeg',
-      jpeg: 'image/jpeg',
-      png: 'image/png',
-      webp: 'image/webp',
-      gif: 'image/gif',
-      pdf: 'application/pdf'
-    };
-
-    if (!types[ext]) {
-      throw new Error('نوع الملف غير مدعوم');
-    }
-
-    var blob = new Blob([bytes], { type: types[ext] });
-    var url = URL.createObjectURL(blob);
-
-    preview.location.href = url;
-
-    setTimeout(function () {
-      URL.revokeObjectURL(url);
-    }, 600000);
-
+    preview.location.replace(result.fileUrl);
   } catch (err) {
     preview.close();
     toast('تعذر فتح المرفق: ' + err.message);
