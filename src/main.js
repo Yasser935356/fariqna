@@ -4,8 +4,7 @@
 
 
 
-
-import { Client, Account, TablesDB, ID, Query, Users, Storage } from "node-appwrite";
+import { Client, Account, TablesDB, ID, Query, Users, Storage, Tokens } from "node-appwrite";
 import { InputFile } from "node-appwrite/file";
 import { randomInt } from "node:crypto";
 
@@ -15,7 +14,9 @@ const MEMBERS_ID = "6aef25b4002952a7a5ff";
 const TASKS_ID = "6aef29b0001e100d5905";
 const TASK_ASSIGNEES_ID = "6aef2c360036aa8a7879";
 const MESSAGES_ID = "6af36073003490c9eff4";
-const ATTACHMENTS_BUCKET_ID = "6af40a8700134c679043";
+const ATTACHMENTS_BUCKET_ID = process.env.FARIQNA_ATTACHMENTS_BUCKET_ID || "6af40a8700134c679043";
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
+const MAX_PDF_SIZE = 50 * 1024 * 1024;
 function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let result = "";
@@ -505,6 +506,98 @@ if (body?.action === "listWorkspaces") {
     tasks
   });
 }
+    // ---------- إضافة مرفق كبير رُفع مباشرة إلى Appwrite Storage ----------
+    // ارفع الملف في الواجهة باستخدام Appwrite Storage SDK (يرفع أجزاء 5MB تلقائيًا).
+    // لا تمنح إذن قراءة عامًا للملف. إذن القراءة لصاحب الرفع فقط، ثم
+    // رابط مؤقت للمُصرَّح لهم بعد التحقق من عضوية المساحة/تكليف المهمة.
+    if (body?.action === "finalizeAttachmentUpload") {
+      const workspaceId = String(body.workspaceId || "").trim();
+      const taskId = String(body.taskId || "").trim();
+      const fileId = String(body.fileId || "").trim();
+      const caption = String(body.caption || "").trim();
+      if (!workspaceId || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,35}$/.test(fileId) || caption.length > 2000) {
+        return res.json({success:false,message:"بيانات المرفق غير صحيحة"},400);
+      }
+      if (!(await canAccessChat(tables,workspaceId,taskId,user.$id))) {
+        return res.json({success:false,message:"ليس لديك صلاحية لإرسال مرفقات هنا"},403);
+      }
+      let file;
+      try {
+        file = await storage.getFile({bucketId:ATTACHMENTS_BUCKET_ID,fileId});
+      } catch (err) {
+        if (Number(err?.code) === 404) return res.json({success:false,message:"الملف غير موجود"},404);
+        throw err;
+      }
+      // يمنع إرفاق ملف يخص مستخدمًا آخر. صلاحيات القراءة يجب تحديدها عند الرفع.
+      const ownerPermission = `read("user:${user.$id}")`;
+      if (!Array.isArray(file.$permissions) || !file.$permissions.includes(ownerPermission)) {
+        return res.json({success:false,message:"لا يمكنك إرفاق ملف لا تملكه"},403);
+      }
+      const name = String(file.name || "").replace(/[\/\\\x00-\x1f\x7f]/g,"_").slice(0,120);
+      const extension = name.split(".").pop().toLowerCase();
+      const allowedMime = {
+        jpg:["image/jpeg"],jpeg:["image/jpeg"],png:["image/png"],
+        gif:["image/gif"],webp:["image/webp"],pdf:["application/pdf"]
+      };
+      const limit = extension === "pdf" ? MAX_PDF_SIZE : MAX_IMAGE_SIZE;
+      const kind = extension === "pdf" ? "pdf" : "image";
+      if (!allowedMime[extension] || !allowedMime[extension].includes(file.mimeType) ||
+          !Number.isSafeInteger(file.sizeOriginal) || file.sizeOriginal < 1 || file.sizeOriginal > limit) {
+        return res.json({success:false,message:"يُسمح بصور حتى 20MB وملفات PDF حتى 50MB فقط"},400);
+      }
+      const existing = await tables.listRows({
+        databaseId:DATABASE_ID,tableId:MESSAGES_ID,
+        queries:[Query.equal("attachmentId",fileId),Query.limit(1)]
+      });
+      if (existing.rows.length) {
+        return res.json({success:false,message:"تم إرفاق هذا الملف سابقًا"},409);
+      }
+      const created = await tables.createRow({
+        databaseId:DATABASE_ID,tableId:MESSAGES_ID,rowId:ID.unique(),
+        data:{workspaceId,senderId:user.$id,content:name,caption,messageType:kind,
+          attachmentId:fileId,...(taskId?{taskId}:{})},permissions:[]
+      });
+      return res.json({success:true,message:"تم إرسال المرفق بنجاح",messageData:{
+        id:created.$id,attachmentId:fileId,messageType:kind
+      }});
+    }
+
+    // ---------- رابط مؤقت لقراءة المرفق بأمان دون تمرير ملف 50MB عبر الوظيفة ----------
+    if (body?.action === "getAttachmentLink") {
+      const workspaceId=String(body.workspaceId||"").trim();
+      const taskId=String(body.taskId||"").trim();
+      const messageId=String(body.messageId||"").trim();
+      if (!workspaceId || !messageId) {
+        return res.json({success:false,message:"بيانات المرفق غير مكتملة"},400);
+      }
+      if (!(await canAccessChat(tables,workspaceId,taskId,user.$id))) {
+        return res.json({success:false,message:"ليس لديك صلاحية لعرض هذا المرفق"},403);
+      }
+      let message;
+      try {
+        message=await tables.getRow({databaseId:DATABASE_ID,tableId:MESSAGES_ID,rowId:messageId});
+      } catch (err) {
+        if (Number(err?.code) === 404) return res.json({success:false,message:"المرفق غير موجود"},404);
+        throw err;
+      }
+      if (message.workspaceId !== workspaceId || (message.taskId||"") !== taskId ||
+          !message.attachmentId || !["image","pdf"].includes(message.messageType)) {
+        return res.json({success:false,message:"ليس لديك صلاحية لعرض هذا المرفق"},403);
+      }
+      // رابط يمكن لمن يحصل عليه فتح الملف، لذا تنتهي صلاحيته بعد دقيقة واحدة.
+      const tokens = new Tokens(serverClient);
+      const token = await tokens.createFileToken({
+        bucketId:ATTACHMENTS_BUCKET_ID,
+        fileId:message.attachmentId,
+        expire:new Date(Date.now()+60*1000).toISOString()
+      });
+      const url = new URL(`${endpoint.replace(/\/$/,"")}/storage/buckets/${encodeURIComponent(ATTACHMENTS_BUCKET_ID)}/files/${encodeURIComponent(message.attachmentId)}/view`);
+      url.searchParams.set("project",projectId);
+      url.searchParams.set("token",token.secret);
+      return res.json({success:true,fileName:message.content,messageType:message.messageType,
+        fileUrl:url.toString()});
+    }
+
     // ---------- عرض رسائل الغرفة أو المهمة ----------
     // ---------- إرسال صورة / PDF مع تعليق ----------
     if (body?.action === "uploadAttachment") {
